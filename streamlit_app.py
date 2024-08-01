@@ -315,6 +315,10 @@ st.sidebar.header("API Configuration")
 api_key = st.sidebar.text_input("Etherscan API Key", "YOUR_API_KEY_HERE")
 address = st.sidebar.text_input("Contract Address", "0x7bea39867e4169dbe237d55c8242a8f2fcdcc387")
 
+st.sidebar.markdown(
+    '[Back to Main Page (mydiamondhands)](https://mydiamondhands.io/)',
+    unsafe_allow_html=True
+)
 
 if st.button("Run Analysis"):
     with st.spinner("Fetching and processing data..."):
