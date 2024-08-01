@@ -414,7 +414,7 @@ if st.button("Run Analysis"):
                         net_gains.append(net_gain)
                     
                     #to compensate for the for loop
-                    threshold = threshold - 100
+                    #threshold = threshold - 100
                     
                     # Display results
                     st.subheader("Potential Returns based on your Budget")
