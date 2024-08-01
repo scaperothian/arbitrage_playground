@@ -379,26 +379,47 @@ if st.button("Run Analysis"):
                 if y_pct_pred is not None and y_gas_pred is not None:
                     df_final = Final_results_processing(LGBM_org_data['time'],y_pct_test,y_pct_pred,y_gas_test,y_gas_pred)
 
+                    #to compensate for the for loop
+                    threshold = threshold + 100
+                    thresholds = list(range(1000, threshold, 100))
+                    net_gains = []
+                    total_losses = []
+                    total_gains = []
+                    
+                    for threshold in thresholds:
+                        # Filter the DataFrame for gains
+                        df_gain = df_final[(df_final['Profit'] > 0) 
+                                           & (df_final['min_amount_to_invest_prediction_2'] > 0) 
+                                           & (df_final['min_amount_to_invest_prediction_2'] < threshold)]
+                        total_gain = df_gain['Profit'].sum()
+                        
+                        # Filter the DataFrame for losses
+                        df_loss = df_final[((df_final['Profit'] < 0) 
+                                        & (df_final['min_amount_to_invest_prediction_2'] > 0) 
+                                        & (df_final['min_amount_to_invest_prediction_2'] < threshold))]
+                        df_loss = df_final[((df_final['Profit'] < 0) 
+                                        & (df_final['min_amount_to_invest_prediction_2'] > 0) 
+                                        & (df_final['min_amount_to_invest_prediction_2'] < threshold))]
+                        total_loss = df_loss['Profit'].sum()
+                        
+                        # Calculate net gain
+                        total_losses.append(total_loss)
+                        total_gains.append(total_gain)
+                        
+                        net_gain = total_gain + total_loss
+                        net_gains.append(net_gain)
+                    
+                    #to compensate for the for loop
+                    threshold = threshold - 100
                     
                     # Display results
                     st.subheader("Potential Returns based on your Budget")
-
-                    
-
-                    df_gain = df_final[((df_final['Profit'] > 0) 
-                                        & (df_final['min_amount_to_invest_prediction_2'] > 0) 
-                                        & (df_final['min_amount_to_invest_prediction_2'] < threshold))]
-                    total_gain = df_gain['Profit'].sum()
+                    total_gain = total_gains[-1]
                     st.write(f"Total Potential Gain: ${total_gain:.2f}")
                     st.write(df_gain)
 
                     
-                    # Filter the DataFrame
-                    df_loss = df_final[((df_final['Profit'] < 0) 
-                                        & (df_final['min_amount_to_invest_prediction_2'] > 0) 
-                                        & (df_final['min_amount_to_invest_prediction_2'] < threshold))]
-                    
-                    total_loss = df_loss['Profit'].sum()
+                    total_loss = total_losses[-1]
                     st.write(f"Total Potential Loss: ${total_loss:.2f}")
                     st.write(df_loss)
 
@@ -410,25 +431,7 @@ if st.button("Run Analysis"):
                     # Plot Net Gain vs. Minimum Amount to Invest
                     st.subheader("Net Gain vs. Minimum Amount to Invest")
                     st.write(f"This graph is created under the assumption that if the transactions during the day were within your budget you invested the minimum amount predicted by the model each time.")
-                    thresholds = list(range(1000, threshold, 100))
-                    net_gains = []
-                    
-                    for threshold in thresholds:
-                        # Filter the DataFrame for gains
-                        df_gain = df_final[(df_final['Profit'] > 0) 
-                                           & (df_final['min_amount_to_invest_prediction_2'] > 0) 
-                                           & (df_final['min_amount_to_invest_prediction_2'] < threshold)]
-                        total_gain = df_gain['Profit'].sum()
-                        
-                        # Filter the DataFrame for losses
-                        df_loss = df_final[(df_final['Profit'] < 0) 
-                                           & (df_final['min_amount_to_invest_prediction_2'] > 0) 
-                                           & (df_final['min_amount_to_invest_prediction_2'] < threshold)]
-                        total_loss = df_loss['Profit'].sum()
-                        
-                        # Calculate net gain
-                        net_gain = total_gain + total_loss
-                        net_gains.append(net_gain)
+
                     
                     # Create a DataFrame for plotting
                     results_df = pd.DataFrame({
