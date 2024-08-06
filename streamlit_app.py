@@ -345,8 +345,8 @@ if st.button("Run Analysis"):
                 test_predictions = None
                 y_gas_pred = None
 
-                # Run LSTM model
-                with st.spinner("Running LSTM model..."):
+                # Run LGBM model
+                with st.spinner("Running LGBM model..."):
                     LGBM = load_model("LGBM_Percent_Change_v1")
                     if LGBM is not None:
                         try:
@@ -354,13 +354,13 @@ if st.button("Run Analysis"):
                             mse = mean_squared_error(y_pct_test, y_pct_pred, squared=False)
                             r2 = r2_score(y_pct_test, y_pct_pred)
                             
-                            st.subheader("LSTM Model Results")
+                            st.subheader("LGBM Model Results")
                             st.write(f"Mean Squared Error: {mse:.4f}")
                             st.write(f"R² Score: {r2:.4f}")
                         except Exception as e:
                             st.error(f"Error running LGBM model: {str(e)}")
                     else:
-                        st.error("Failed to load LGBM model. Skipping LSTM analysis.")
+                        st.error("Failed to load LGBM model. Skipping LGBM analysis.")
 
                 # Run XGB model
                 with st.spinner("Running XGB model..."):
@@ -473,7 +473,7 @@ if st.button("Run Analysis"):
 
                     if is_less_than_ten_minutes:
                         if df_min['min_amount_to_invest_prediction_2'].iloc[-1] < 0:
-                            st.write(f'Arbitrage Opportunity does not exist five minutes after {df_min["time"].iloc[-1]}')
+                            st.write(f'Arbitrage Opportunity does not exist ten minutes after {df_min["time"].iloc[-1]}')
                         else:
                             if df_min['percent_change_prediction'].iloc[-1] < 0:
                                 st.write(f'Pool1:0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 \n Pool2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640 \n Buy Pool 1 and Sell in Pool 2 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
