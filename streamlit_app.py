@@ -452,7 +452,7 @@ if st.button("Run Analysis"):
                     st.write(f"Total Net Gain: ${net_gain:.2f}")
                     st.write(f"Average Minimum Investment: ${avg_positive_min_investment:.2f}")
                     st.write(f"Median Profit Per Transaction: ${med_profit:.2f}")
-                    st.write(f"Average Profit Per Transaction: ${avg_profit:.2f}")
+                    #st.write(f"Average Profit Per Transaction: ${avg_profit:.2f}")
                     
                     # Plot Net Gain vs. Minimum Amount to Invest
                     experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
