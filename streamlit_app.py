@@ -9,10 +9,12 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_squared_error, r2_score
 import xgboost as xgb
-import tensorflow as tf
+#import tensorflow as tf
 import random
 import time
 import lightgbm as lgb
+
+st.set_page_config(page_title="Arbitrage Playground", page_icon=None, layout="centered", initial_sidebar_state="collapsed")
 
 st.title("Arbitrage Playground")
 st.write(
@@ -278,7 +280,7 @@ def display_current_arbitrage(df_min):
             print(f'Arbitrage Opportunity does not exist five minutes after {df_min["time"].iloc[-1]}')
         else:
             if df_min['percent_change_prediction'].iloc[-1] < 0:
-                print(f'Pool1:0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 \n Pool2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640 \n Buy Pool 1 and Sell in Pool 2 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
+                print(f'Buy Pool 1 ({pool1_address }) and Sell in Pool 2 ({pool2_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
             else:
                 print(f'Pool1:0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 \n Pool2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640 \n Buy Pool 2 and Sell in Pool 1 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
                 
@@ -300,11 +302,11 @@ def load_model(model_name):
         return None
     
     try:
-        if model_name.startswith("LSTM"):
-            model = tf.keras.models.load_model(model_path)
-        else:
-            with open(model_path, 'rb') as f:
-                model = pickle.load(f)
+        #if model_name.startswith("LSTM"):
+        #    model = tf.keras.models.load_model(model_path)
+        #else:
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
         st.success(f"Model {model_name} loaded successfully from {model_path}")
         return model
     except Exception as e:
@@ -315,9 +317,13 @@ def load_model(model_name):
 # Sidebar
 st.sidebar.header("API Configuration")
 
+
+
 # API key input
-api_key = st.sidebar.text_input("Etherscan API Key", "YOUR_API_KEY_HERE")
-address = st.sidebar.text_input("Contract Address", "0x7bea39867e4169dbe237d55c8242a8f2fcdcc387")
+api_key = st.sidebar.text_input("Etherscan API Key", "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2")
+pool0_address = st.sidebar.text_input("Pool 0 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
+pool1_address = st.sidebar.text_input("Pool 1 Address", "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640")
+
 
 st.sidebar.markdown(
     '[Back to Main Page (mydiamondhands)](https://mydiamondhands.io/)',
@@ -327,8 +333,8 @@ st.sidebar.markdown(
 if st.button("Run Analysis"):
     with st.spinner("Fetching and processing data..."):
         # Fetch and process data for both pools
-        p0, transactions = etherscan_request('tokentx', api_key, address='0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8')
-        p1, transactions1 = etherscan_request('tokentx', api_key, address='0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640')
+        p0, transactions = etherscan_request('tokentx', api_key, address=pool0_address)
+        p1, transactions1 = etherscan_request('tokentx', api_key, address=pool1_address)
         
         if p0 is None or p1 is None:
             st.error("Failed to fetch data from Etherscan. Please check your API key and try again.")
@@ -394,6 +400,8 @@ if st.button("Run Analysis"):
                     total_losses = []
                     total_gains = []
                     
+                   
+
                     for threshold in thresholds:
                         # Filter the DataFrame for gains
                         df_gain = df_final[(df_final['Profit'] > 0) 
@@ -433,32 +441,47 @@ if st.button("Run Analysis"):
 
                     
                     net_gain = total_gain + total_loss
-                    st.write(f"Net Gain/Loss at budget of ${threshold}: ${net_gain:.2f}")
-                    
+                    avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction_2']>0]['min_amount_to_invest_prediction_2'].mean()
+                    avg_profit = df_final['Profit'].mean()
+                    med_profit = df_final['Profit'].median()
+
+                    number_of_simulated_swaps = df_final.shape[0]
+
+                    st.subheader(f'Selected Budget Simulated Results ({number_of_simulated_swaps} Transactions)')
+                    st.write(f"Budget threshold: ${threshold:.2f}")
+                    st.write(f"Total Net Gain: ${net_gain:.2f}")
+                    st.write(f"Average Minimum Investment: ${avg_positive_min_investment:.2f}")
+                    st.write(f"Median Profit Per Transaction: ${med_profit:.2f}")
+                    st.write(f"Average Profit Per Transaction: ${avg_profit:.2f}")
                     
                     # Plot Net Gain vs. Minimum Amount to Invest
+                    experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
+                    print(f"Time Duration: {experiment_duration}")
                     st.subheader("Net Gain vs. Minimum Amount to Invest")
-                    st.write(f"This graph is created under the assumption that if the transactions during the day were within your budget you invested the minimum amount predicted by the model each time.")
+                    st.write(f"This graph is created by simulating {number_of_simulated_swaps} transactions using actual market conditions in the last {experiment_duration.total_seconds() / 3600:.1f} hours.  The simulation assumes that if the transactions during the day were within your budget you invested the minimum amount predicted by the model each time.")
 
-                    
                     # Create a DataFrame for plotting
                     results_df = pd.DataFrame({
                         'Threshold': thresholds,
                         'Net Gain': net_gains
                     })
                     
+                    experimental_df = results_df[results_df['Net Gain']>0]
+
                     # Plot the results
                     plt.figure(figsize=(10, 6))
                     plt.plot(results_df['Threshold'], results_df['Net Gain'], marker='o')
                     plt.title('Net Gain vs. Minimum Amount to Invest')
                     plt.xlabel('Minimum Amount to Invest')
                     plt.ylabel('Net Gain')
+                    #plt.yscale('log')
                     #plt.ylim(-1000000, 1000000)
                     plt.grid(True)
                     plt.show()
                     st.pyplot(plt)
 
                     st.subheader('Minimum Amount Prediction in next 10 minutes')
+
                     # Predictions
                     df_final_LGBM_X_test_dates = df_final_LGBM_X_test['time']
                     df_final_LGBM_X_test = df_final_LGBM_X_test[['percent_change', 'rolling_mean_8', 'lag_1', 'lag_2']]
@@ -474,15 +497,15 @@ if st.button("Run Analysis"):
 
                     # Check if the difference is less than 10 minutes
                     is_less_than_ten_minutes = time_difference < timedelta(minutes=10)
-
+                    ten_minutes = timedelta(minutes=10)
                     if is_less_than_ten_minutes:
                         if df_min['min_amount_to_invest_prediction_2'].iloc[-1] < 0:
-                            st.write(f'Arbitrage Opportunity does not exist ten minutes after {df_min["time"].iloc[-1]}')
+                            st.write(f'Arbitrage Opportunity is not expected ten minutes from now.')
                         else:
                             if df_min['percent_change_prediction'].iloc[-1] < 0:
-                                st.write(f'Pool1:0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 \n Pool2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640 \n Buy Pool 1 and Sell in Pool 2 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
+                                st.write(f'Buy Pool 0 ({pool0_address}) and Sell in Pool 1 ({pool1_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+ten_minutes}')
                             else:
-                                st.write(f'Pool1:0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 \n Pool2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640 \n Buy Pool 2 and Sell in Pool 1 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
+                                st.write(f'Buy Pool 1 ({pool1_address}) and Sell in Pool 0 ({pool0_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction_2"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+ten_minutes}')
                                 
                     else:
                         st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than ten minutes old, unable to provide minimum amount to invest")
