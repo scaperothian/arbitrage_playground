@@ -7,7 +7,7 @@ import requests
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import root_mean_squared_error, r2_score
 import xgboost as xgb
 #import tensorflow as tf
 import random
@@ -361,11 +361,11 @@ if st.button("Run Analysis"):
                     if LGBM is not None:
                         try:
                             y_pct_pred = LGBM.predict(X_pct_test, num_iteration=LGBM.best_iteration)
-                            mse = mean_squared_error(y_pct_test, y_pct_pred, squared=False)
+                            rmse = root_mean_squared_error(y_pct_test, y_pct_pred)
                             r2 = r2_score(y_pct_test, y_pct_pred)
                             
-                            st.subheader("LGBM Model Results")
-                            st.write(f"Mean Squared Error: {mse:.4f}")
+                            st.subheader("LGBM Price Model Results")
+                            st.write(f"Root Mean Squared Error: {rmse:.4f}")
                             st.write(f"R² Score: {r2:.4f}")
                         except Exception as e:
                             st.error(f"Error running LGBM model: {str(e)}")
@@ -378,11 +378,11 @@ if st.button("Run Analysis"):
                     if XGB is not None:
                         try:
                             y_gas_pred = XGB.predict(X_gas_test)
-                            mse_gas = mean_squared_error(y_gas_test, y_gas_pred, squared=False)
+                            rmse_gas = root_mean_squared_error(y_gas_test, y_gas_pred)
                             r2_gas = r2_score(y_gas_test, y_gas_pred)
 
-                            st.subheader("XGB Model Results")
-                            st.write(f"Mean Squared Error: {mse_gas:.4f}")
+                            st.subheader("XGB Gas Fee Model Results")
+                            st.write(f"Root Mean Squared Error: {rmse_gas:.4f}")
                             st.write(f"R² Score: {r2_gas:.4f}")
                         except Exception as e:
                             st.error(f"Error running XGB model: {str(e)}")
@@ -477,7 +477,7 @@ if st.button("Run Analysis"):
                     #plt.yscale('log')
                     #plt.ylim(-1000000, 1000000)
                     plt.grid(True)
-                    plt.show()
+                    #plt.show()
                     st.pyplot(plt)
 
                     st.subheader('Minimum Amount Prediction in next 10 minutes')
