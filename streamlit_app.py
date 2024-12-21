@@ -6,6 +6,8 @@ import pickle
 import requests
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
 from datetime import datetime, timedelta
 from sklearn.metrics import root_mean_squared_error, r2_score
 import xgboost as xgb
@@ -13,6 +15,9 @@ import xgboost as xgb
 import random
 import time
 import lightgbm as lgb
+
+import seaborn as sns
+sns.set_style('darkgrid')
 
 st.set_page_config(page_title="Arbitrage Playground", page_icon=None, layout="centered", initial_sidebar_state="collapsed")
 
@@ -429,19 +434,58 @@ if st.button("Run Analysis"):
                     #threshold = threshold - 100
                     
                     # Display results
-                    st.subheader("Potential Returns based on your Budget")
+                    st.subheader("Raw Results")
+                    #st.subheader("Potential Returns based on your Budget")
                     total_gain = total_gains[-1]
-                    st.write(f"Total Potential Gain: ${total_gain:.2f}")
-                    st.write(df_gain)
+                    #st.write(f"Total Potential Gain: ${total_gain:.2f}")
+                    st.write(df_final)
 
                     
                     total_loss = total_losses[-1]
-                    st.write(f"Total Potential Loss: ${total_loss:.2f}")
-                    st.write(df_loss)
+                    #st.write(f"Total Potential Loss: ${total_loss:.2f}")
+                    #st.write(df_loss)
 
-                    
+                    experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
+
+                    st.subheader(f"Minimum Investment in the last {experiment_duration.total_seconds() / 3600:.1f} hours.")
+
+                    # Create a single figure with two subplots (1 row, 2 columns)
+                    fig, axs = plt.subplots(2, 1, figsize=(14, 10))
+
+                    # First plot (scatter plot)
+                    axs[0].scatter(df_final['time'], df_final['min_amount_to_invest_prediction_2'], marker='o')
+                    axs[0].set_xlabel('time')
+                    axs[0].set_ylabel('Minimum Amount to Invest')
+                    max_ylim = df_final['min_amount_to_invest_prediction_2'].max()
+                    axs[0].set_ylim(0, max_ylim)
+                    axs[0].set_title(f'Scatter Plot of Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hours')
+
+                    # Format the x-axis to show HH:MM:SS
+                    axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+                    axs[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+                    #fig.autofmt_xdate()  # Rotates the labels to prevent overlap
+
+
+                    # Second plot (histogram)
+                    df_final_fig1b = df_final[df_final['min_amount_to_invest_prediction_2'] > 0][['min_amount_to_invest_prediction_2']]
+                    axs[1].hist(df_final_fig1b, bins=100)
+                    axs[1].set_xlabel('Minimum Amount to Invest')
+                    axs[1].set_title('Distribution of Minimum Investment in last 10 minutes')
+                    # Optionally set y-axis limits for the histogram
+                    # axs[1].set_ylim(0, max_ylim)
+
+                    # Adjust layout for better spacing
+                    #plt.tight_layout()
+
+                    # Display the figure in Streamlit
+                    st.pyplot(fig)
+
+
+
                     net_gain = total_gain + total_loss
                     avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction_2']>0]['min_amount_to_invest_prediction_2'].mean()
+                    median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction_2']>0]['min_amount_to_invest_prediction_2'].median()
+
                     avg_profit = df_final['Profit'].mean()
                     med_profit = df_final['Profit'].median()
 
@@ -449,13 +493,16 @@ if st.button("Run Analysis"):
 
                     st.subheader(f'Selected Budget Simulated Results ({number_of_simulated_swaps} Transactions)')
                     st.write(f"Budget threshold: ${threshold:.2f}")
-                    st.write(f"Total Net Gain: ${net_gain:.2f}")
+                    #st.write(f"Total Net Gain: ${net_gain:.2f}")
                     st.write(f"Average Minimum Investment: ${avg_positive_min_investment:.2f}")
+                    st.write(f"Median Minimum Investment: ${median_positive_min_investment:.2f}")
+                    st.write(f"Percent of Transactions with Profitable Outcomes: {df_gain.shape[0]/df_final.shape[0]*100:.1f}%")
+
+
                     st.write(f"Median Profit Per Transaction: ${med_profit:.2f}")
                     #st.write(f"Average Profit Per Transaction: ${avg_profit:.2f}")
                     
                     # Plot Net Gain vs. Minimum Amount to Invest
-                    experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
                     print(f"Time Duration: {experiment_duration}")
                     st.subheader("Net Gain vs. Minimum Amount to Invest")
                     st.write(f"This graph is created by simulating {number_of_simulated_swaps} transactions using actual market conditions in the last {experiment_duration.total_seconds() / 3600:.1f} hours.  The simulation assumes that if the transactions during the day were within your budget you invested the minimum amount predicted by the model each time.")
@@ -469,7 +516,7 @@ if st.button("Run Analysis"):
                     experimental_df = results_df[results_df['Net Gain']>0]
 
                     # Plot the results
-                    plt.figure(figsize=(10, 6))
+                    fig2 = plt.figure(figsize=(10, 6))
                     plt.plot(results_df['Threshold'], results_df['Net Gain'], marker='o')
                     plt.title('Net Gain vs. Minimum Amount to Invest')
                     plt.xlabel('Minimum Amount to Invest')
@@ -478,7 +525,7 @@ if st.button("Run Analysis"):
                     #plt.ylim(-1000000, 1000000)
                     plt.grid(True)
                     #plt.show()
-                    st.pyplot(plt)
+                    st.pyplot(fig2)
 
                     st.subheader('Minimum Amount Prediction in next 10 minutes')
 
