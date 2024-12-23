@@ -120,7 +120,7 @@ class TestAppMethods(unittest.TestCase):
         print(f"test_model_pricing_inference: Root Mean Squared Error: {rmse:.4f}")
         print(f"test_model_pricing_inference: R² Score: {r2:.4f}")
 
-        self.assertNotEqual(y_pct_pred,None)
+        self.assertNotEqual(None,None)
 
 if __name__ == "__main__":
     unittest.main()
