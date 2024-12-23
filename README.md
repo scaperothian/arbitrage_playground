@@ -12,8 +12,13 @@ A simple Streamlit app template for you to modify!
    $ pip install -r requirements.txt
    ```
 
-2. Run the app
+2. (optional) Run unittests
+   ```
+   python -m unittest tests.test_app   
+   ```
+
+3. Run the app
 
    ```
-   $ streamlit run streamlit_app.py
+   $ streamlit run src/streamlit_app.py
    ```
