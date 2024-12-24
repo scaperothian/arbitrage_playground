@@ -21,6 +21,8 @@ sns.set_style('darkgrid')
 
 st.set_page_config(page_title="Arbitrage Playground", page_icon=None, layout="centered", initial_sidebar_state="collapsed")
 
+FORECAST_WINDOW_MIN=1
+
 st.title("Arbitrage Playground")
 st.write(
     "Use this app to experiment with different cross-liquidity pool arbitrage scenarios in WETH/USDC liquidity pools. Enter an Etherscan API key, your budget,  and click run to simulate performance."
@@ -182,7 +184,7 @@ def merge_pool_data(p0,p1):
 def XGB_preprocessing(both_pools):
     int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
     int_df = int_df[['time','total_gas_fees_usd']]
-    df_3M = shift_column_by_time(int_df, 'time', 'total_gas_fees_usd', 10)
+    df_3M = shift_column_by_time(int_df, 'time', 'total_gas_fees_usd', FORECAST_WINDOW_MIN)
     df_3M.index = df_3M.pop('time')
     df_3M.index = pd.to_datetime(df_3M.index)
 
@@ -196,11 +198,11 @@ def XGB_preprocessing(both_pools):
     
     df_3M.dropna(inplace=True)
     lag_features = [f'lag_{i}' for i in range(1, num_lags + 1)]
-    X_gas_test = df_3M[lag_features + ['total_gas_fees_usd','rolling_mean_3', 'rolling_mean_6']]
+    X_gas_test = df_3M[['total_gas_fees_usd']+lag_features + ['rolling_mean_3', 'rolling_mean_6']]
     y_gas_test = df_3M['total_gas_fees_usd_label']
     
-    df_nan = df_nan[['lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
-       'lag_9', 'total_gas_fees_usd', 'rolling_mean_3', 'rolling_mean_6']]
+    df_nan = df_nan[['total_gas_fees_usd', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
+       'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
 
     return df_nan, X_gas_test, y_gas_test
     
@@ -257,7 +259,7 @@ def LGBM_Preprocessing(both_pools):
     """
     int_df = both_pools.copy()
     int_df = int_df[['time','percent_change']]
-    int_df = shift_column_by_time(int_df, 'time', 'percent_change', 10)
+    int_df = shift_column_by_time(int_df, 'time', 'percent_change', FORECAST_WINDOW_MIN)
     num_lags = 2  # Number of lags to create
     for i in range(1, num_lags + 1):
         int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
@@ -300,19 +302,19 @@ def display_current_arbitrage(df_min):
     time_difference = now - df_min['time'].iloc[-1]
     
     # Check if the difference is less than 5 minutes
-    is_less_than_five_minutes = time_difference < timedelta(minutes=10)
+    is_less_than_five_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
     
     if is_less_than_five_minutes:
         if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
             print(f'Arbitrage Opportunity does not exist five minutes after {df_min["time"].iloc[-1]}')
         else:
             if df_min['percent_change_prediction'].iloc[-1] < 0:
-                print(f'Buy Pool 1 ({pool1_address }) and Sell in Pool 2 ({pool2_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
+                print(f'Buy Pool 1 ({pool1_address}) and Sell in Pool 2 ({pool2_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
             else:
-                print(f'Pool1:0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8 \n Pool2:0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640 \n Buy Pool 2 and Sell in Pool 1 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
+                print(f'Pool 1 ({pool1_address} \n Pool 2 ({pool2_address}) \n Buy Pool 2 and Sell in Pool 1 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]} {FORECAST_WINDOW_MIN} minutes after {df_min["time"].iloc[-1]}')
                 
     else:
-        print(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than ten minutes old, unable to provide minimum amount to invest")
+        print(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {FORECAST_WINDOW_MIN} minutes old, unable to provide minimum amount to invest")
 
 
 @st.cache_resource
@@ -384,7 +386,7 @@ if st.button("Run Analysis"):
 
                 # Run LGBM model
                 with st.spinner("Running LGBM model..."):
-                    LGBM = load_model("LGBM_Percent_Change_v1")
+                    LGBM = load_model(f"percent_change_{FORECAST_WINDOW_MIN}min_forecast_LGBM")
                     if LGBM is not None:
                         try:
                             y_pct_pred = LGBM.predict(X_pct_test, num_iteration=LGBM.best_iteration)
@@ -401,7 +403,7 @@ if st.button("Run Analysis"):
 
                 # Run XGB model
                 with st.spinner("Running XGB model..."):
-                    XGB = load_model("XGB_Gas_Prices_v2")
+                    XGB = load_model(f"gas_fees_{FORECAST_WINDOW_MIN}min_forecast_XGBoost")
                     if XGB is not None:
                         try:
                             y_gas_pred = XGB.predict(X_gas_test)
@@ -479,7 +481,7 @@ if st.button("Run Analysis"):
                     axs[0].set_xlabel('time')
                     axs[0].set_ylabel('Minimum Amount to Invest')
                     max_ylim = df_final['min_amount_to_invest_prediction'].max()
-                    axs[0].set_ylim(0, max_ylim)
+                    axs[0].set_ylim(0, max_ylim * 1.2)
                     axs[0].set_title(f'Scatter Plot of Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hours')
 
                     # Format the x-axis to show HH:MM:SS
@@ -492,7 +494,7 @@ if st.button("Run Analysis"):
                     df_final_fig1b = df_final[df_final['min_amount_to_invest_prediction'] > 0][['min_amount_to_invest_prediction']]
                     axs[1].hist(df_final_fig1b, bins=100)
                     axs[1].set_xlabel('Minimum Amount to Invest')
-                    axs[1].set_title('Distribution of Minimum Investment in last 10 minutes')
+                    axs[1].set_title(f'Distribution of Minimum Investment in last {FORECAST_WINDOW_MIN} minutes')
                     # Optionally set y-axis limits for the histogram
                     # axs[1].set_ylim(0, max_ylim)
 
@@ -549,7 +551,7 @@ if st.button("Run Analysis"):
                     #plt.show()
                     st.pyplot(fig2)
 
-                    st.subheader('Minimum Amount Prediction in next 10 minutes')
+                    st.subheader(f'Minimum Amount Prediction in next {FORECAST_WINDOW_MIN} minutes (UNDER CONSTRUCTION)')
 
                     # Predictions
                     df_final_LGBM_X_test_dates = df_final_LGBM_X_test['time']
@@ -565,11 +567,11 @@ if st.button("Run Analysis"):
                     time_difference = now - df_min['time'].iloc[-1]
 
                     # Check if the difference is less than 10 minutes
-                    is_less_than_ten_minutes = time_difference < timedelta(minutes=10)
-                    ten_minutes = timedelta(minutes=10)
+                    is_less_than_ten_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
+                    ten_minutes = timedelta(minutes=FORECAST_WINDOW_MIN)
                     if is_less_than_ten_minutes:
                         if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
-                            st.write(f'Arbitrage Opportunity is not expected ten minutes from now.')
+                            st.write(f'Arbitrage Opportunity is not expected {FORECAST_WINDOW_MIN} minutes from now.')
                         else:
                             if df_min['percent_change_prediction'].iloc[-1] < 0:
                                 st.write(f'Buy Pool 0 ({pool0_address}) and Sell in Pool 1 ({pool1_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+ten_minutes}')
