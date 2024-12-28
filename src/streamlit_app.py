@@ -33,7 +33,7 @@ threshold = st.slider('Select Budget', min_value=1000, max_value=40000, value=10
 st.write(f'Selected Budget: {threshold}')
 
 # fetch data from Etherscan API
-@st.cache_data
+@st.cache_data(ttl=60)
 def etherscan_request(action, api_key, address, startblock=0, endblock=99999999, sort='desc'):
     """
     fetch transactions from address
