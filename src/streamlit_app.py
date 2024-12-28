@@ -19,6 +19,8 @@ import lightgbm as lgb
 import seaborn as sns
 sns.set_style('darkgrid')
 
+import arbutils
+
 st.set_page_config(page_title="Arbitrage Playground", page_icon=None, layout="centered", initial_sidebar_state="collapsed")
 
 FORECAST_WINDOW_MIN=1
@@ -35,82 +37,11 @@ st.write(f'Selected Budget: {threshold}')
 # fetch data from Etherscan API
 @st.cache_data(ttl=60)
 def etherscan_request(action, api_key, address, startblock=0, endblock=99999999, sort='desc'):
-    """
-    fetch transactions from address
-    
-    Return: 
-
-    """
-    base_url = 'https://api.etherscan.io/api'
-    params = {
-        'module': 'account',
-        'action': action,
-        'address': address,
-        'startblock': startblock,
-        'endblock': endblock,
-        'sort': sort,
-        'apikey': api_key
-    }
-    
-    response = requests.get(base_url, params=params)
-    if response.status_code != 200:
-        st.error(f"API request failed with status code {response.status_code}")
-        return None, None
-    
-    data = response.json()
-    if data['status'] != '1':
-        st.error(f"API returned an error: {data['result']}")
-        return None, None
-    
-    df = pd.DataFrame(data['result'])
-    
-    expected_columns = ['hash', 'blockNumber', 'timeStamp', 'from', 'to', 'gas', 'gasPrice', 'gasUsed', 'cumulativeGasUsed', 'confirmations', 'tokenSymbol', 'value', 'tokenName']
-    
-    for col in expected_columns:
-        if col not in df.columns:
-            raise Exception(f"Expected column '{col}' is missing from the response")
-    
-    df['value'] = pd.to_numeric(df['value'], errors='coerce')
-    
-    # Set Transaction Value in Appropriate Format
-    df['og_value'] = df['value'].copy()
-    df['value'] = np.where(df['tokenDecimal']=='6', df['value']/100000, df['value']/1000000000000000000)
-
-    # Sort by timestamp in descending order and select the most recent 10,000 trades
-    df['timeStamp'] = pd.to_numeric(df['timeStamp'])
-    df = df.sort_values(by='timeStamp', ascending=False).head(10000)
-    
-    consolidated_data = {}
-
-    for index, row in df.iterrows():
-        tx_hash = row['hash']
-        
-        if tx_hash not in consolidated_data:
-            consolidated_data[tx_hash] = {
-                'blockNumber': row['blockNumber'],
-                'timeStamp': row['timeStamp'],
-                'hash': tx_hash,
-                'from': row['from'],
-                'to': row['to'],
-                'WETH_value': 0,
-                'USDC_value': 0,
-                'tokenName_WETH': '',
-                'tokenName_USDC': '',
-                'gas': row['gas'],
-                'gasPrice': row['gasPrice'],
-                'gasUsed': row['gasUsed'],
-                'cumulativeGasUsed': row['cumulativeGasUsed'],
-                'confirmations': row['confirmations']
-            }
-        
-        if row['tokenSymbol'] == 'WETH':
-            consolidated_data[tx_hash]['WETH_value'] = row['value']
-            consolidated_data[tx_hash]['tokenName_WETH'] = row['tokenName']
-        elif row['tokenSymbol'] == 'USDC':
-            consolidated_data[tx_hash]['USDC_value'] = row['value']
-            consolidated_data[tx_hash]['tokenName_USDC'] = row['tokenName']
-
-    return pd.DataFrame.from_dict(consolidated_data, orient='index')
+    results = arbutils.etherscan_request(action, api_key, address, startblock, endblock, sort)
+    if type(results)!=pd.DataFrame: 
+        st.error(results[1])
+    else:
+        return results
 
 def shift_column_by_time(df, time_col, value_col, shift_minutes):
     """
@@ -149,34 +80,7 @@ def str_to_datetime(s):
 
 @st.cache_data
 def merge_pool_data(p0,p1):
-    #Format P0 and P0 variables of interest
-    p0['time'] = p0['timeStamp'].apply(lambda x: datetime.fromtimestamp(x))
-    p0['p0.weth_to_usd_ratio'] = p0['WETH_value']/p0['USDC_value']
-    p0['gasPrice'] = p0['gasPrice'].astype(float)
-    p0['gasUsed']= p0['gasUsed'].astype(float)
-    p0['p0.gas_fees_usd'] = (p0['gasPrice']/1e9)*(p0['gasUsed']/1e9)*p0['p0.weth_to_usd_ratio']
-    p1['time'] = p1['timeStamp'].apply(lambda x: datetime.fromtimestamp(x))
-    p1['p1.weth_to_usd_ratio'] = p1['WETH_value']/p1['USDC_value']
-    p1['gasPrice'] = p1['gasPrice'].astype(float)
-    p1['gasUsed']= p1['gasUsed'].astype(float)
-    p1['p1.gas_fees_usd'] = (p1['gasPrice']/1e9)*(p1['gasUsed']/1e9)*p1['p1.weth_to_usd_ratio']
-
-    #Merge Pool data
-    both_pools = pd.merge(p0[['time','timeStamp','p0.weth_to_usd_ratio','p0.gas_fees_usd']],
-                          p1[['time','timeStamp','p1.weth_to_usd_ratio','p1.gas_fees_usd']],
-                          on=['time','timeStamp'], how='outer'
-                         ).sort_values(by='timeStamp')
-    both_pools = both_pools.ffill().reset_index(drop=True)
-    both_pools = both_pools.dropna()
-    both_pools['percent_change'] = (both_pools['p0.weth_to_usd_ratio'] - both_pools['p1.weth_to_usd_ratio'])/both_pools[['p0.weth_to_usd_ratio','p1.weth_to_usd_ratio']].min(axis=1)
-    both_pools['total_gas_fees_usd'] = both_pools['p0.gas_fees_usd'] + both_pools['p1.gas_fees_usd']
-    
-    # Replace inf with NaN
-    both_pools.replace([np.inf, -np.inf], np.nan, inplace=True)
-    
-    # Drop rows with NaN values (which were originally inf)
-    both_pools.dropna(inplace=True)
-    return both_pools
+    return arbutils.merge_pool_data(p0,p1)
     
 def XGB_preprocessing(both_pools):
     int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
@@ -291,29 +195,6 @@ def final_min_amt_invest(dates_test, test_predictions, index, gas_predictions):
     )
     return df_final
 
-
-def display_current_arbitrage(df_min):
-    now = datetime.now()
-        
-    # Difference between current time and given timestamp
-    time_difference = now - df_min['time'].iloc[-1]
-    
-    # Check if the difference is less than 5 minutes
-    is_less_than_five_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
-    
-    if is_less_than_five_minutes:
-        if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
-            print(f'Arbitrage Opportunity does not exist five minutes after {df_min["time"].iloc[-1]}')
-        else:
-            if df_min['percent_change_prediction'].iloc[-1] < 0:
-                print(f'Buy Pool 1 ({pool1_address}) and Sell in Pool 2 ({pool2_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]} ten minutes after {df_min["time"].iloc[-1]}')
-            else:
-                print(f'Pool 1 ({pool1_address} \n Pool 2 ({pool2_address}) \n Buy Pool 2 and Sell in Pool 1 \n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]} {FORECAST_WINDOW_MIN} minutes after {df_min["time"].iloc[-1]}')
-                
-    else:
-        print(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {FORECAST_WINDOW_MIN} minutes old, unable to provide minimum amount to invest")
-
-
 @st.cache_resource
 def load_model(model_name):
     models_dir = os.path.join(os.getcwd(), 'models')
@@ -342,8 +223,6 @@ def load_model(model_name):
 
 # Sidebar
 st.sidebar.header("API Configuration")
-
-
 
 # API key input
 api_key = st.sidebar.text_input("Etherscan API Key", "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2")
@@ -414,52 +293,7 @@ if st.button("Run Analysis"):
                 if y_pct_pred is not None and y_gas_pred is not None:
                     df_final = Final_results_processing(LGBM_org_data['time'],y_pct_test,y_pct_pred,y_gas_test,y_gas_pred)
 
-                    #to compensate for the for loop
-                    threshold = threshold + 100
-                    thresholds = list(range(1000, threshold, 100))
-                    net_gains = []
-                    total_losses = []
-                    total_gains = []
-                    
-                   
-
-                    for threshold in thresholds:
-                        # Filter the DataFrame for gains
-                        df_gain = df_final[(df_final['Profit'] > 0) 
-                                           & (df_final['min_amount_to_invest_prediction'] > 0) 
-                                           & (df_final['min_amount_to_invest_prediction'] < threshold)]
-                        total_gain = df_gain['Profit'].sum()
-                        
-                        # Filter the DataFrame for losses
-                        df_loss = df_final[((df_final['Profit'] < 0) 
-                                        & (df_final['min_amount_to_invest_prediction'] > 0) 
-                                        & (df_final['min_amount_to_invest_prediction'] < threshold))]
-                        df_loss = df_final[((df_final['Profit'] < 0) 
-                                        & (df_final['min_amount_to_invest_prediction'] > 0) 
-                                        & (df_final['min_amount_to_invest_prediction'] < threshold))]
-                        total_loss = df_loss['Profit'].sum()
-                        
-                        # Calculate net gain
-                        total_losses.append(total_loss)
-                        total_gains.append(total_gain)
-                        
-                        net_gain = total_gain + total_loss
-                        net_gains.append(net_gain)
-                    
-                    #to compensate for the for loop
-                    #threshold = threshold - 100
-                    
-                    # Display results
-                    #st.subheader("Raw Results")
-                    #st.subheader("Potential Returns based on your Budget")
-                    total_gain = total_gains[-1]
-                    #st.write(f"Total Potential Gain: ${total_gain:.2f}")
-                    #st.write(df_final)
-
-                    
-                    total_loss = total_losses[-1]
-                    #st.write(f"Total Potential Loss: ${total_loss:.2f}")
-                    #st.write(df_loss)
+                    print(df_final.columns)
 
                     experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
                     avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
@@ -470,37 +304,42 @@ if st.button("Run Analysis"):
 
                     number_of_simulated_swaps = df_final.shape[0]
 
+                    # ##########################################################################
+                    #
+                    #  Section 1: Rollup stats from simulation
+                    #
+                    # ##########################################################################
+                    df_gain = df_final[(df_final['Profit'] > 0) 
+                                        & (df_final['min_amount_to_invest_prediction'] > 0) 
+                                        & (df_final['min_amount_to_invest_prediction'] < threshold)]
 
                     st.subheader(f'Selected Budget Simulated Results')
                     st.write(f"Simulation Duration: {experiment_duration.total_seconds() / 3600:.1f} hour(s)")
                     st.write(f"Number of Transactions used in Simulation: {number_of_simulated_swaps}")
-                    #st.write(f"Budget threshold: ${threshold:.2f}")
-                    #st.write(f"Total Net Gain: ${net_gain:.2f}")
                     st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
                     st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
                     st.write(f"Percent of Transactions with Profitable Outcomes: {df_gain.shape[0]/df_final.shape[0]*100:.1f}%")
                     st.write(f"Median Profit Per Transaction: ${med_profit:.2f}")
                     #st.write(f"Average Profit Per Transaction: ${avg_profit:.2f}")
-                    
-                    # Plot Net Gain vs. Minimum Amount to Invest
-                    print(f"Time Duration: {experiment_duration}")
 
                     st.subheader(f"Recommended Minimum Investment in the last {experiment_duration.total_seconds() / 3600:.1f} hour(s).")
 
-                    # Create a single figure with two subplots (1 row, 2 columns)
-                    fig, axs = plt.subplots(2, 1, figsize=(14, 10))
+                    # ##########################################################################
+                    #
+                    #  Section 2a: Scatter plot of Recommended Minimum Investment Amount over time
+                    #
+                    # ##########################################################################
+                    fig2, axs2 = plt.subplots(2, 1, figsize=(14, 10))
 
-                    # First plot (scatter plot)
-                  
-                    axs[0].scatter(df_final['time'], df_final['min_amount_to_invest_prediction'], marker='o')
-                    axs[0].set_xlabel('time')
-                    axs[0].set_ylabel('Recommended Minimum Amount to Invest')
+                    axs2[0].scatter(df_final['time'], df_final['min_amount_to_invest_prediction'], marker='o')
+                    axs2[0].set_xlabel('time')
+                    axs2[0].set_ylabel('Recommended Minimum Amount to Invest')
                     max_ylim = df_final['min_amount_to_invest_prediction'].max()
 
                     # Add horizontal line at the threshold
-                    axs[0].axhline(y=threshold, color='black', linestyle='--', label=f'Threshold = {threshold}')
+                    axs2[0].axhline(y=threshold, color='black', linestyle='--', label=f'Threshold = {threshold}')
                     # Add annotation to the line
-                    axs[0].annotate(
+                    axs2[0].annotate(
                         "Selected Budget",
                         xy=(df_final['time'].min(), threshold),  # Far right of the plot
                         xytext=(10, 5),  # Offset to position the text just above the line
@@ -512,26 +351,35 @@ if st.button("Run Analysis"):
                     )
 
                     #axs[0].set_ylim(0, max_ylim * 1.2)
-                    axs[0].set_yscale('log')
-                    axs[0].set_title(f'Scatter Plot of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
+                    axs2[0].set_yscale('log')
+                    axs2[0].set_title(f'Scatter Plot of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
 
                     # Format the x-axis to show HH:MM:SS
-                    axs[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-                    axs[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+                    axs2[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+                    axs2[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
                     #fig.autofmt_xdate()  # Rotates the labels to prevent overlap
 
-
-                    # Second plot (histogram)
-                    df_final_fig1b = df_final[
+                    # ##########################################################################
+                    #
+                    #  Section 2b: Histogram Recommended Minimum Investment Amount bounded by
+                    #            "budget" threshold
+                    #
+                    # ##########################################################################
+                    df_final_fig2b = df_final[
                         (df_final['min_amount_to_invest_prediction'] > 0) & 
                         (df_final['min_amount_to_invest_prediction'] < threshold)
                     ][['min_amount_to_invest_prediction']]
 
                     # Calculate histogram data
-                    data = df_final_fig1b['min_amount_to_invest_prediction']
+                    data = df_final_fig2b['min_amount_to_invest_prediction']
                     hist_values, bin_edges = np.histogram(data, bins=50)
 
+                    #
                     # Find the largest bin
+                    # Why? its an interesting artifact of the data that the histogram reveals a 
+                    #      peak 'mode' where minimum investment appears.  may be derived from 
+                    #      transaction fees and gas fees at the time?
+                    #
                     max_bin_index = np.argmax(hist_values)
                     max_bin_count = hist_values[max_bin_index]
 
@@ -539,10 +387,8 @@ if st.button("Run Analysis"):
                     bin_width = bin_edges[1] - bin_edges[0]
                     bin_center = bin_edges[max_bin_index] + bin_width / 2
 
-                    print(f"Bin Width: {bin_width}, Bin Center: {bin_center}")
-                    #
                     #  Annotate the largest bin
-                    axs[1].annotate(
+                    axs2[1].annotate(
                         f"Bin Center: {bin_center:.2f} +/- {bin_width/2:.2f}\n",
                         xy=(bin_center, max_bin_count),
                         xytext=(bin_center + bin_width, max_bin_count*0.8),  # Middle of the plot, slightly to the right
@@ -553,43 +399,20 @@ if st.button("Run Analysis"):
                     )
 
                     # Plot the histogram
-                    axs[1].hist(data, bins=50, alpha=0.7)
-                    axs[1].set_xlabel('Recommended Minimum Amount to Invest')
-                    axs[1].set_title(f'Distribution of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
-                    axs[1].set_xlim(0, threshold)
-
+                    axs2[1].hist(data, bins=50, alpha=0.7)
+                    axs2[1].set_xlabel('Recommended Minimum Amount to Invest')
+                    axs2[1].set_title(f'Distribution of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
+                    axs2[1].set_xlim(0, threshold)                
+                    
                     # Display the figure in Streamlit
-                    st.pyplot(fig)
+                    st.pyplot(fig2)
 
-                    net_gain = total_gain + total_loss
-
-                    
-                    
-                    #st.subheader("Net Gain vs. Minimum Amount to Invest")
-                    #st.write(f"This graph is created by simulating {number_of_simulated_swaps} transactions using actual market conditions in the last {experiment_duration.total_seconds() / 3600:.1f} hour(s).  The simulation assumes that if the transactions during the day were within your budget you invested the minimum amount predicted by the model each time.")
-
-                    ## Create a DataFrame for plotting
-                    #results_df = pd.DataFrame({
-                    #    'Threshold': thresholds,
-                    #    'Net Gain': net_gains
-                    #})
-                    
-                    #experimental_df = results_df[results_df['Net Gain']>0]
-
-                    ## Plot the results
-                    #fig2 = plt.figure(figsize=(10, 6))
-                    #plt.plot(results_df['Threshold'], results_df['Net Gain'], marker='o')
-                    #plt.title('Net Gain vs. Minimum Amount to Invest')
-                    #plt.xlabel('Minimum Amount to Invest')
-                    #plt.ylabel('Net Gain')
-                    #plt.yscale('log')
-                    ##plt.ylim(-1000000, 1000000)
-                    #plt.grid(True)
-                    ##plt.show()
-                    #st.pyplot(fig2)
-                    
-                    
-                    st.subheader(f'Recommended Minimum Investment Prediction in next {FORECAST_WINDOW_MIN} minute(s)')
+                    # ##########################################################################
+                    #
+                    #  Section 3: Recommended investment based on latest transactions.
+                    #
+                    # ##########################################################################
+                    st.subheader(f'Recommended Minimum Investment Prediction ({FORECAST_WINDOW_MIN} minute forecast)')
 
                     # Predictions
                     df_final_LGBM_X_test_dates = df_final_LGBM_X_test['time']
@@ -604,17 +427,21 @@ if st.button("Run Analysis"):
                     # Difference between current time and last timestamp
                     time_difference = now - df_min['time'].iloc[-1]
 
-                    # Check if the difference is less than 10 minutes
-                    is_less_than_ten_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
-                    ten_minutes = timedelta(minutes=FORECAST_WINDOW_MIN)
-                    if is_less_than_ten_minutes:
+                    # Check if the difference is less than FORCAST_WINDOW_MIN minutes
+                    is_less_than_x_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
+                    x_minutes = timedelta(minutes=FORECAST_WINDOW_MIN)
+                    if is_less_than_x_minutes:
                         if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
                             st.write(f'Arbitrage Opportunity is not expected {FORECAST_WINDOW_MIN} minute(s) from now.')
                         else:
                             if df_min['percent_change_prediction'].iloc[-1] < 0:
-                                st.write(f'Buy Pool 0 ({pool0_address}) and Sell in Pool 1 ({pool1_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+ten_minutes}')
+                                st.write(f'**BUY**: Pool 0 ({pool0_address})')
+                                st.write(f'**SELL**: Pool 1 ({pool1_address})')
+                                st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
                             else:
-                                st.write(f'Buy Pool 1 ({pool1_address}) and Sell in Pool 0 ({pool0_address})\n Minimum amount to invest {df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+ten_minutes}')
+                                st.write(f'**BUY**: Pool 1 ({pool1_address})')
+                                st.write(f'**SELL**: Pool 0 ({pool0_address})')
+                                st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
                                 
                     else:
                         st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {FORECAST_WINDOW_MIN} minute(s) old, unable to provide minimum amount to invest")
@@ -627,11 +454,14 @@ if st.button("Run Analysis"):
                     st.error("Cannot proceed with final processing. Some model predictions are missing.")
 
         st.write(
-            "Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected)."
+            "*Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected).*"
         )
 
-        # Display Raw Table results
-
+        # ##########################################################################
+        #
+        #  Section 4: Raw data for deeper dive.
+        #
+        # ##########################################################################
 
         st.subheader("Raw Results")
         st.write(df_final)
@@ -643,5 +473,58 @@ if st.button("Run Analysis"):
         st.subheader("LGBM Price Model Results")
         st.write(f"Root Mean Squared Error: {y_pct_rmse:.4f}")
         st.write(f"R² Score: {y_pct_r2:.4f}")
+
+
+        # Price Plots
+        st.subheader(f'Pool Price Data')
+        fig3, axs3 = plt.subplots(2, 1, figsize=(14, 10))
+        axs3[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        axs3[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+
+        axs3[0].scatter(both_pools['time'],1/both_pools['p0.weth_to_usd_ratio'], marker='o')
+        axs3[0].scatter(both_pools['time'],1/both_pools['p1.weth_to_usd_ratio'], marker='x')
+
+        axs3[0].set_title('Token Price for Pool 0 / Pool 1')
+        axs3[0].legend(['Pool 0','Pool 1'])
+        axs3[0].set_yscale('log')
+        axs3[0].set_xlabel('time')
+        axs3[0].set_ylabel('USD per Eth (log scale)')
+
+
+        both_pools_concat = both_pools.iloc[-50:]
+        axs3[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        axs3[1].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+
+        axs3[1].scatter(both_pools_concat['time'],1/both_pools_concat['p0.weth_to_usd_ratio'], marker='o')
+        axs3[1].scatter(both_pools_concat['time'],1/both_pools_concat['p1.weth_to_usd_ratio'], marker='x')
+        
+        axs3[1].set_title('Close in Token Price for Pool 0 / Pool 1')
+        axs3[1].legend(['Pool 0','Pool 1'])
+        axs3[1].set_xlabel('time')
+        axs3[1].set_ylabel('USD per Eth (log scale)')
+
+        st.pyplot(fig3)
+
+
+        # Gas Price Plots
+        st.subheader(f'Gas Price Data')
+        fig4, axs4 = plt.subplots(1, 1, figsize=(14, 10))
+        axs4.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        axs4.xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+
+        axs4.scatter(both_pools['time'],both_pools['p0.gas_fees_usd'], marker='o')
+        axs4.scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
+
+        axs4.set_title('Gas Price for Pool 0 / Pool 1')
+        axs4.legend(['Pool 0','Pool 1'])
+        axs4.set_yscale('log')
+        axs4.set_xlabel('time')
+        axs4.set_ylabel('Gas prices in USD (log scale)')
+
+
+        # Display the figure in Streamlit
+        st.pyplot(fig4)
+
+        print(both_pools['total_gas_fees_usd'].head(20))
 
 
