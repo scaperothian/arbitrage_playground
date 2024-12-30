@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 import requests
 import pandas as pd
@@ -123,3 +126,120 @@ def merge_pool_data(p0,p1):
     # Drop rows with NaN values (which were originally inf)
     both_pools.dropna(inplace=True)
     return both_pools
+
+def LGBM_Preprocessing(both_pools, forecast_window_min=10):
+    """
+    Creating evaluation data from the pool.  The model for LGBM is predicting percent_change
+    across the two pools.  
+
+    Return: 
+    - int_df (nans dropped): all columns 'time','percent_change_label', 'percent_change','rolling_mean_8','lag_1','lag_2'
+    - df_nan: data frame with all columns as above, but only keeping the rows where the percent_change_label is nan.  
+                i.e. the first shift_minutes of data.
+    - X_pct_test - only the input features for LGBM.
+    - y_pct_test - only the labels column
+    """
+    int_df = both_pools.copy()
+    int_df = int_df[['time','percent_change']]
+    int_df = shift_column_by_time(int_df, 'time', 'percent_change', forecast_window_min)
+    num_lags = 2  # Number of lags to create
+    for i in range(1, num_lags + 1):
+        int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
+    int_df['rolling_mean_8'] = int_df['percent_change'].rolling(window=8).mean()
+    int_df = int_df[['time','percent_change_label', 'percent_change','rolling_mean_8','lag_1','lag_2']]
+    df_nan = int_df[int_df['percent_change_label'].isna()]
+    
+    int_df.dropna(inplace=True)
+    
+    X_pct_test = int_df[['percent_change','rolling_mean_8','lag_1','lag_2']]
+    y_pct_test = int_df['percent_change_label']
+    return int_df, df_nan, X_pct_test, y_pct_test
+
+def XGB_preprocessing(both_pools, forecast_window_min=10):
+    int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
+    int_df = int_df[['time','total_gas_fees_usd']]
+    df_3M = shift_column_by_time(int_df, 'time', 'total_gas_fees_usd', forecast_window_min)
+    df_3M.index = df_3M.pop('time')
+    df_3M.index = pd.to_datetime(df_3M.index)
+
+    num_lags = 9  # Number of lags to create
+    for i in range(1, num_lags + 1):
+        df_3M[f'lag_{i}'] = df_3M['total_gas_fees_usd'].shift(i)
+    
+    df_3M['rolling_mean_3'] = df_3M['total_gas_fees_usd'].rolling(window=3).mean()
+    df_3M['rolling_mean_6'] = df_3M['total_gas_fees_usd'].rolling(window=6).mean()
+    df_nan = df_3M[df_3M['total_gas_fees_usd_label'].isna()]
+    
+    df_3M.dropna(inplace=True)
+    lag_features = [f'lag_{i}' for i in range(1, num_lags + 1)]
+    X_gas_test = df_3M[['total_gas_fees_usd']+lag_features + ['rolling_mean_3', 'rolling_mean_6']]
+    y_gas_test = df_3M['total_gas_fees_usd_label']
+    
+    df_nan = df_nan[['total_gas_fees_usd', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
+       'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
+
+    return df_nan, X_gas_test, y_gas_test
+
+def shift_column_by_time(df, time_col, value_col, shift_minutes):
+    """
+    The purpose of this method is to create a shifted set of columns
+    that will act as labels downstream model.
+
+    Returns: the same df with an additional column f"{value_col}_label"
+    """
+    # Ensure 'time_col' is in datetime format
+    df[time_col] = pd.to_datetime(df[time_col])
+    
+    # Sort the DataFrame by time
+    df = df.sort_values(by=time_col).reset_index(drop=True)
+    
+    # Create an empty column for the shifted values
+    df[f'{value_col}_label'] = None
+
+    # Iterate over each row and find the appropriate value at least shift_minutes minutes later
+    for i in range(len(df)):
+        current_time = df.loc[i, time_col]
+        future_time = current_time + pd.Timedelta(minutes=shift_minutes)
+        
+        # Find the first row where the time is greater than or equal to the future_time
+        future_row = df[df[time_col] >= future_time]
+        if not future_row.empty:
+            df.at[i, f'{value_col}_label'] = future_row.iloc[0][value_col]
+    
+    return df
+
+def calculate_min_investment(df,gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
+    """
+    adds min_investment_col to a dataframe df.
+    """
+    df[min_investment_col] = df.apply(
+        lambda row: row[gas_fee_col] /
+                    (
+                        (1 + abs(row[percent_change_col])) * (1 - 0.003 if row[percent_change_col] < 0 else 1 - 0.0005) -
+                        (1 - 0.0005 if row[percent_change_col] < 0 else 1 - 0.003)
+                    ),
+        axis=1
+    )
+
+    return df
+
+def load_model(model_name):
+    models_dir = os.path.join(os.getcwd(), 'models')
+    base_model_path = os.path.join(models_dir, model_name)
+    
+    # Check for different possible file extensions
+    possible_extensions = ['', '.h5', '.pkl', '.joblib']
+    model_path = next((base_model_path + ext for ext in possible_extensions if os.path.exists(base_model_path + ext)), None)
+    
+    if model_path is None:
+        print(f"Model file not found for: {model_name}")
+        return None
+    
+    try:
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+        print(f"Model {model_name} loaded successfully from {model_path}")
+        return model
+    except Exception as e:
+        print(f"Error loading model: {str(e)}")
+        return None

@@ -43,69 +43,11 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
     else:
         return results
 
-def shift_column_by_time(df, time_col, value_col, shift_minutes):
-    """
-    The purpose of this method is to create a shifted set of columns
-    that will act as labels downstream model.
 
-    Returns: the same df with an additional column f"{value_col}_label"
-    """
-    # Ensure 'time_col' is in datetime format
-    df[time_col] = pd.to_datetime(df[time_col])
-    
-    # Sort the DataFrame by time
-    df = df.sort_values(by=time_col).reset_index(drop=True)
-    
-    # Create an empty column for the shifted values
-    df[f'{value_col}_label'] = None
-
-    # Iterate over each row and find the appropriate value at least shift_minutes minutes later
-    for i in range(len(df)):
-        current_time = df.loc[i, time_col]
-        future_time = current_time + pd.Timedelta(minutes=shift_minutes)
-        
-        # Find the first row where the time is greater than or equal to the future_time
-        future_row = df[df[time_col] >= future_time]
-        if not future_row.empty:
-            df.at[i, f'{value_col}_label'] = future_row.iloc[0][value_col]
-    
-    return df
-
-def str_to_datetime(s):
-    split = s.split(' ')
-    date_part, time_part = split[0], split[1]
-    year, month, day = map(int, date_part.split('-'))
-    hour, minute, second = map(int, time_part.split(':'))
-    return datetime(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
 
 @st.cache_data
 def merge_pool_data(p0,p1):
     return arbutils.merge_pool_data(p0,p1)
-    
-def XGB_preprocessing(both_pools):
-    int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
-    int_df = int_df[['time','total_gas_fees_usd']]
-    df_3M = shift_column_by_time(int_df, 'time', 'total_gas_fees_usd', FORECAST_WINDOW_MIN)
-    df_3M.index = df_3M.pop('time')
-    df_3M.index = pd.to_datetime(df_3M.index)
-
-    num_lags = 9  # Number of lags to create
-    for i in range(1, num_lags + 1):
-        df_3M[f'lag_{i}'] = df_3M['total_gas_fees_usd'].shift(i)
-    
-    df_3M['rolling_mean_3'] = df_3M['total_gas_fees_usd'].rolling(window=3).mean()
-    df_3M['rolling_mean_6'] = df_3M['total_gas_fees_usd'].rolling(window=6).mean()
-    df_nan = df_3M[df_3M['total_gas_fees_usd_label'].isna()]
-    
-    df_3M.dropna(inplace=True)
-    lag_features = [f'lag_{i}' for i in range(1, num_lags + 1)]
-    X_gas_test = df_3M[['total_gas_fees_usd']+lag_features + ['rolling_mean_3', 'rolling_mean_6']]
-    y_gas_test = df_3M['total_gas_fees_usd_label']
-    
-    df_nan = df_nan[['total_gas_fees_usd', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
-       'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
-
-    return df_nan, X_gas_test, y_gas_test
     
 def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas_pred):
     df_percent_change = pd.DataFrame({
@@ -120,14 +62,11 @@ def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas
     
     df_final = pd.merge(df_percent_change, df_gas, how = 'left', on = 'time')
     df_final = df_final.dropna()
-    df_final['min_amount_to_invest_prediction'] = df_final.apply(
-        lambda row: row['gas_fees_prediction'] /
-                    (
-                        (1 + abs(row['percent_change_prediction'])) * (1 - 0.003 if row['percent_change_prediction'] < 0 else 1 - 0.0005) -
-                        (1 - 0.0005 if row['percent_change_prediction'] < 0 else 1 - 0.003)
-                    ),
-        axis=1
-    )
+
+    df_final = arbutils.calculate_min_investment(df_final, 
+                                        gas_fee_col='gas_fees_prediction', 
+                                        percent_change_col='percent_change_prediction', 
+                                        min_investment_col='min_amount_to_invest_prediction')
     
     df_final['Profit'] = df_final.apply(
         lambda row: (row['min_amount_to_invest_prediction'] * 
@@ -137,42 +76,9 @@ def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas
         axis=1
     )
     
-    df_final['Double_Check'] = df_final.apply(
-        lambda row: (row['min_amount_to_invest_prediction'] * 
-                     (1 + abs(row['percent_change_prediction'])) * (1 - 0.003 if row['percent_change_prediction'] < 0 else 1 - 0.0005) -
-                     row['min_amount_to_invest_prediction'] * (1 - 0.0005 if row['percent_change_prediction'] < 0 else 1 - 0.003) -
-                     row['gas_fees_prediction']),
-        axis=1
-    )
     return df_final
 
-def LGBM_Preprocessing(both_pools):
-    """
-    Creating evaluation data from the pool.  The model for LGBM is predicting percent_change
-    across the two pools.  
 
-    Return: 
-    - int_df (nans dropped): all columns 'time','percent_change_label', 'percent_change','rolling_mean_8','lag_1','lag_2'
-    - df_nan: data frame with all columns as above, but only keeping the rows where the percent_change_label is nan.  
-                i.e. the first shift_minutes of data.
-    - X_pct_test - only the input features for LGBM.
-    - y_pct_test - only the labels column
-    """
-    int_df = both_pools.copy()
-    int_df = int_df[['time','percent_change']]
-    int_df = shift_column_by_time(int_df, 'time', 'percent_change', FORECAST_WINDOW_MIN)
-    num_lags = 2  # Number of lags to create
-    for i in range(1, num_lags + 1):
-        int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
-    int_df['rolling_mean_8'] = int_df['percent_change'].rolling(window=8).mean()
-    int_df = int_df[['time','percent_change_label', 'percent_change','rolling_mean_8','lag_1','lag_2']]
-    df_nan = int_df[int_df['percent_change_label'].isna()]
-    
-    int_df.dropna(inplace=True)
-    
-    X_pct_test = int_df[['percent_change','rolling_mean_8','lag_1','lag_2']]
-    y_pct_test = int_df['percent_change_label']
-    return int_df, df_nan, X_pct_test, y_pct_test
 
 def final_min_amt_invest(dates_test, test_predictions, index, gas_predictions):
     df_percent_change = pd.DataFrame({
@@ -209,9 +115,6 @@ def load_model(model_name):
         return None
     
     try:
-        #if model_name.startswith("LSTM"):
-        #    model = tf.keras.models.load_model(model_path)
-        #else:
         with open(model_path, 'rb') as f:
             model = pickle.load(f)
         st.success(f"Model {model_name} loaded successfully from {model_path}")
@@ -249,10 +152,10 @@ if st.button("Run Analysis"):
        
         
             # LGBM Preprocessing
-            LGBM_org_data, df_final_LGBM_X_test, X_pct_test, y_pct_test = LGBM_Preprocessing(both_pools)
+            LGBM_org_data, df_final_LGBM_X_test, X_pct_test, y_pct_test = arbutils.LGBM_Preprocessing(both_pools, FORECAST_WINDOW_MIN)
         
             # XGB Preprocessing
-            df_final_XGB_X_test, X_gas_test, y_gas_test = XGB_preprocessing(both_pools)
+            df_final_XGB_X_test, X_gas_test, y_gas_test = arbutils.XGB_preprocessing(both_pools, FORECAST_WINDOW_MIN)
         
             if df_final_LGBM_X_test is None or X_pct_test is None or y_pct_test is None or df_final_XGB_X_test is None or X_gas_test is None or y_gas_test is None:
                 st.error("Preprocessing failed. Cannot proceed with analysis.")
