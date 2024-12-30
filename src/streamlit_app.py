@@ -11,6 +11,7 @@ import matplotlib.dates as mdates
 from datetime import datetime, timedelta
 from sklearn.metrics import root_mean_squared_error, r2_score
 import xgboost as xgb
+
 #import tensorflow as tf
 import random
 import time
@@ -43,7 +44,15 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
     else:
         return results
 
+# 
+@st.cache_data
+def LGBM_Preprocessing(both_pools, forecast_window_min=10):
+    return arbutils.LGBM_Preprocessing(both_pools, forecast_window_min)
 
+# 
+@st.cache_data
+def XGB_preprocessing(both_pools, forecast_window_min=10):
+    return arbutils.XGB_preprocessing(both_pools, forecast_window_min)
 
 @st.cache_data
 def merge_pool_data(p0,p1):
@@ -152,10 +161,10 @@ if st.button("Run Analysis"):
        
         
             # LGBM Preprocessing
-            LGBM_org_data, df_final_LGBM_X_test, X_pct_test, y_pct_test = arbutils.LGBM_Preprocessing(both_pools, FORECAST_WINDOW_MIN)
+            LGBM_org_data, df_final_LGBM_X_test, X_pct_test, y_pct_test = LGBM_Preprocessing(both_pools, FORECAST_WINDOW_MIN)
         
             # XGB Preprocessing
-            df_final_XGB_X_test, X_gas_test, y_gas_test = arbutils.XGB_preprocessing(both_pools, FORECAST_WINDOW_MIN)
+            df_final_XGB_X_test, X_gas_test, y_gas_test = XGB_preprocessing(both_pools, FORECAST_WINDOW_MIN)
         
             if df_final_LGBM_X_test is None or X_pct_test is None or y_pct_test is None or df_final_XGB_X_test is None or X_gas_test is None or y_gas_test is None:
                 st.error("Preprocessing failed. Cannot proceed with analysis.")
