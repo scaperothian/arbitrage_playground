@@ -293,7 +293,7 @@ if st.button("Run Analysis"):
                 if y_pct_pred is not None and y_gas_pred is not None:
                     df_final = Final_results_processing(LGBM_org_data['time'],y_pct_test,y_pct_pred,y_gas_test,y_gas_pred)
 
-                    print(df_final.columns)
+                    #print(df_final.columns)
 
                     experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
                     avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
@@ -306,21 +306,19 @@ if st.button("Run Analysis"):
 
                     # ##########################################################################
                     #
-                    #  Section 1: Rollup stats from simulation
+                    #  Section 1: Rollup stats from past transactions
                     #
                     # ##########################################################################
                     df_gain = df_final[(df_final['Profit'] > 0) 
                                         & (df_final['min_amount_to_invest_prediction'] > 0) 
                                         & (df_final['min_amount_to_invest_prediction'] < threshold)]
 
-                    st.subheader(f'Selected Budget Simulated Results')
-                    st.write(f"Simulation Duration: {experiment_duration.total_seconds() / 3600:.1f} hour(s)")
-                    st.write(f"Number of Transactions used in Simulation: {number_of_simulated_swaps}")
+                    st.subheader(f'Results from Previous {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
+                    st.write(f"Number of Transactions: {number_of_simulated_swaps}")
                     st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
                     st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
-                    st.write(f"Percent of Transactions with Profitable Outcomes: {df_gain.shape[0]/df_final.shape[0]*100:.1f}%")
-                    st.write(f"Median Profit Per Transaction: ${med_profit:.2f}")
-                    #st.write(f"Average Profit Per Transaction: ${avg_profit:.2f}")
+                    st.write(f"Percent of Transactions with Profitable Arbitrage Opportunities: {df_gain.shape[0]/df_final.shape[0]*100:.1f}%")
+                    st.write(f"Median Profit Per Transaction (when gain is actualized): ${med_profit:.2f}")
 
                     st.subheader(f"Recommended Minimum Investment in the last {experiment_duration.total_seconds() / 3600:.1f} hour(s).")
 
@@ -421,7 +419,8 @@ if st.button("Run Analysis"):
                     y_final_gas_pred = XGB.predict(df_final_XGB_X_test)
                     
                     df_min = final_min_amt_invest(df_final_LGBM_X_test_dates, y_final_pct_pred, df_final_XGB_X_test.index, y_final_gas_pred)
-
+                    #import pdb
+                    #pdb.set_trace()
                     now = datetime.now()
 
                     # Difference between current time and last timestamp
@@ -464,15 +463,25 @@ if st.button("Run Analysis"):
         # ##########################################################################
 
         st.subheader("Raw Results")
-        st.write(df_final)
+        st.write(df_final.sort_values(by='time',ascending=False))
+
+        st.subheader("LGBM Price Model Results")
+        st.write(f"Root Mean Squared Error: {y_pct_rmse:.4f}")
+        st.write(f"R² Score: {y_pct_r2:.4f}")
+
+        #figa, axsa = plt.subplots(1, 1, figsize=(14, 10))
+        #print(len(y_pct_pred), both_pools.shape[0])
+        #print(y_pct_pred[:30])
+        #axsa.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        #axsa.scatter(y_pct_test, y_pct_pred, marker='o')
+        #st.pyplot(figa)
+
 
         st.subheader("XGB Gas Fee Model Results")
         st.write(f"Root Mean Squared Error: {y_gas_rmse:.4f}")
         st.write(f"R² Score: {y_gas_r2:.4f}")
 
-        st.subheader("LGBM Price Model Results")
-        st.write(f"Root Mean Squared Error: {y_pct_rmse:.4f}")
-        st.write(f"R² Score: {y_pct_r2:.4f}")
+
 
 
         # Price Plots
@@ -525,6 +534,66 @@ if st.button("Run Analysis"):
         # Display the figure in Streamlit
         st.pyplot(fig4)
 
-        print(both_pools['total_gas_fees_usd'].head(20))
+        
+        # Build Minimum Investment Breakout Table
+        st.subheader('Minimum Investment CalculationBreakout')
+        last_sample_ds = both_pools.iloc[-1]
+        last_sample_ds_pred = df_min.iloc[-1]
+
+        A = 1/last_sample_ds['p0.weth_to_usd_ratio']    # Pool 0 ETH / USDC
+        B = 0.005                                        # Pool 0 Transaction Fee
+        C = last_sample_ds['p0.gas_fees_usd']           # Pool 0 Gas Fees
+        D = 1/last_sample_ds['p1.weth_to_usd_ratio']    # Pool 1 ETH / USDC
+        E = 0.03                                        # Pool 1 Transaction Fee
+        F = last_sample_ds['p1.gas_fees_usd']           # Pool 1 Gas Fees
+        G = last_sample_ds['percent_change']            # Percent Change in Transaction Price
+        H = last_sample_ds['total_gas_fees_usd']        # Total Gas Fees
+        J = last_sample_ds_pred['percent_change_prediction']
+        K = last_sample_ds_pred['gas_fees_prediction']
+
+        L = last_sample_ds['total_gas_fees_usd'] / \
+                    (
+                        (1 + abs(last_sample_ds['percent_change'])) * (1 - 0.003 if last_sample_ds['percent_change'] < 0 else 1 - 0.0005) -
+                        (1 - 0.0005 if last_sample_ds['percent_change'] < 0 else 1 - 0.003)
+                    )
+        M = last_sample_ds_pred['gas_fees_prediction'] / \
+                    (
+                        (1 + abs(last_sample_ds_pred['percent_change_prediction'])) * (1 - 0.003 if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - 0.0005) -
+                        (1 - 0.0005 if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - 0.003)
+                    )
+
+        
+        table_dict = {
+            'Last Transaction': [A, B, C, D, E, F, G, H, L],
+            'Predicted': ['', B, '', '', E, '', J, K, M],
+            'Index': [
+                'Pool 1 Transaction',
+                'Pool 1 Transaction Fee',
+                'Pool 1 Gas Fee',
+                'Pool 2 Transaction',
+                'Pool 2 Transaction Fee',
+                'Pool 2 Gas Fee',
+                'Percent Change',
+                'Total Gas Fees',
+                'Minimum Investment'
+            ]
+        }
+
+        # Convert the dictionary to a DataFrame
+        table_df = pd.DataFrame(table_dict)
+        table_df.set_index('Index', inplace=True)
+        table_df['Last Transaction'] = table_df['Last Transaction'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
+        table_df['Predicted'] = table_df['Predicted'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
+
+        st.table(table_df)
+
+        #min_invest_last_sample = 
+
+        #print(min_invest_last_sample)
+
+        #min_invest_pred = 
+
+        #print(min_invest_pred)
+
 
 
