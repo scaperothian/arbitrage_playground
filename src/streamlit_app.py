@@ -313,14 +313,14 @@ if st.button("Run Analysis"):
                                         & (df_final['min_amount_to_invest_prediction'] > 0) 
                                         & (df_final['min_amount_to_invest_prediction'] < threshold)]
 
-                    st.subheader(f'Results from Previous {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
+                    st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
                     st.write(f"Number of Transactions: {number_of_simulated_swaps}")
                     st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
                     st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
                     st.write(f"Percent of Transactions with Profitable Arbitrage Opportunities: {df_gain.shape[0]/df_final.shape[0]*100:.1f}%")
                     st.write(f"Median Profit Per Transaction (when gain is actualized): ${med_profit:.2f}")
 
-                    st.subheader(f"Recommended Minimum Investment in the last {experiment_duration.total_seconds() / 3600:.1f} hour(s).")
+                    st.subheader(f"Recommended Minimum Investment in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s).")
 
                     # ##########################################################################
                     #
@@ -475,7 +475,6 @@ if st.button("Run Analysis"):
         #axsa.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
         #axsa.scatter(y_pct_test, y_pct_pred, marker='o')
         #st.pyplot(figa)
-
 
         st.subheader("XGB Gas Fee Model Results")
         st.write(f"Root Mean Squared Error: {y_gas_rmse:.4f}")

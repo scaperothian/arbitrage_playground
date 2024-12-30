@@ -48,8 +48,20 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
 
     # Sort by timestamp in descending order and select the most recent 10,000 trades
     df['timeStamp'] = pd.to_numeric(df['timeStamp'])
-    df = df.sort_values(by='timeStamp', ascending=False).head(10000)
+    df = df.sort_values(by='timeStamp', ascending=False)
     
+    # Get the current timestamp (in Unix time)
+    current_timestamp = df['timeStamp'].iloc[0]  # Current time in seconds since epoch
+
+    # Calculate the timestamp for 24 hours ago
+    threshold_timestamp = current_timestamp - (12 * 60 * 60)  # 24 hours in seconds
+
+    # Filter the DataFrame to include only rows within the last 24 hours
+    df = df[df['timeStamp'] >= threshold_timestamp]
+
+    # Sort by timestamp in descending order (most recent first)
+    df = df.sort_values(by='timeStamp', ascending=False)
+
     consolidated_data = {}
 
     for index, row in df.iterrows():
@@ -88,12 +100,12 @@ def merge_pool_data(p0,p1):
     p0['p0.weth_to_usd_ratio'] = p0['WETH_value']/p0['USDC_value']
     p0['gasPrice'] = p0['gasPrice'].astype(float)
     p0['gasUsed']= p0['gasUsed'].astype(float)
-    p0['p0.gas_fees_usd'] = (p0['gasPrice']/1e9)*(p0['gasUsed']/1e9)*p0['p0.weth_to_usd_ratio']
+    p0['p0.gas_fees_usd'] = ((p0['gasPrice']/1e9)*(p0['gasUsed']/1e9)*(1/p0['p0.weth_to_usd_ratio']))
     p1['time'] = p1['timeStamp'].apply(lambda x: datetime.fromtimestamp(x))
     p1['p1.weth_to_usd_ratio'] = p1['WETH_value']/p1['USDC_value']
     p1['gasPrice'] = p1['gasPrice'].astype(float)
     p1['gasUsed']= p1['gasUsed'].astype(float)
-    p1['p1.gas_fees_usd'] = (p1['gasPrice']/1e9)*(p1['gasUsed']/1e9)*p1['p1.weth_to_usd_ratio']
+    p1['p1.gas_fees_usd'] = ((p1['gasPrice']/1e9)*(p1['gasUsed']/1e9)*(1/p1['p1.weth_to_usd_ratio']))
 
     #Merge Pool data
     both_pools = pd.merge(p0[['time','timeStamp','p0.weth_to_usd_ratio','p0.gas_fees_usd']],
