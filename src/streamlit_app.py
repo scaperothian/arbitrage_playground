@@ -139,8 +139,9 @@ st.sidebar.header("API Configuration")
 # API key input
 api_key = st.sidebar.text_input("Etherscan API Key", "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2")
 pool0_address = st.sidebar.text_input("Pool 0 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
+pool0_txn_fee = st.sidebar.text_input("Pool 0 Transaction Fee (Rate)",0.003)
 pool1_address = st.sidebar.text_input("Pool 1 Address", "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640")
-
+pool1_txn_fee = st.sidebar.text_input("Pool 1 Transaction Fee (Rate)",0.0005)
 
 st.sidebar.markdown(
     '[Back to Main Page (mydiamondhands)](https://mydiamondhands.io/)',
@@ -497,14 +498,6 @@ if st.button("Run Analysis"):
         table_df['Predicted'] = table_df['Predicted'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
 
         st.table(table_df)
-
-        #min_invest_last_sample = 
-
-        #print(min_invest_last_sample)
-
-        #min_invest_pred = 
-
-        #print(min_invest_pred)
 
 
 

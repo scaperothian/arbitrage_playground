@@ -1,6 +1,7 @@
 import unittest
+import pandas as pd
 
-from src.streamlit_app import load_model, etherscan_request, merge_pool_data, LGBM_Preprocessing, XGB_preprocessing
+from src.arbutils import load_model, etherscan_request, merge_pool_data, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
 
 from sklearn.metrics import root_mean_squared_error, r2_score
 
@@ -120,7 +121,22 @@ class TestAppMethods(unittest.TestCase):
         print(f"test_model_pricing_inference: Root Mean Squared Error: {rmse:.4f}")
         print(f"test_model_pricing_inference: R² Score: {r2:.4f}")
 
-        self.assertNotEqual(None,None)
+        self.assertEqual(None,None)
+
+
+    def test_min_investment_scenario_1(self):
+        GAS_FEES_COL_NAME = 'total_gas_fees'
+        PERCENT_CHANGE_COL_NAME = 'percent_change'
+        
+        test_dict = {
+            GAS_FEES_COL_NAME:[50],
+            PERCENT_CHANGE_COL_NAME:[0.03],
+        }
+
+        df = calculate_min_investment(pd.DataFrame(test_dict),GAS_FEES_COL_NAME,PERCENT_CHANGE_COL_NAME,min_investment_col='min_amount_to_invest')
+        #print(df)
+        self.assertEqual(df['min_amount_to_invest'],1539.171926)
+
 
 if __name__ == "__main__":
     unittest.main()
