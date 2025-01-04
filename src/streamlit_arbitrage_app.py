@@ -139,9 +139,9 @@ st.sidebar.header("API Configuration")
 # API key input
 api_key = st.sidebar.text_input("Etherscan API Key", "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2")
 pool0_address = st.sidebar.text_input("Pool 0 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
-pool0_txn_fee = st.sidebar.text_input("Pool 0 Transaction Fee (Rate)",0.003)
+pool0_txn_fee = float(st.sidebar.text_input("Pool 0 Transaction Fee (Rate)",0.003))
 pool1_address = st.sidebar.text_input("Pool 1 Address", "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640")
-pool1_txn_fee = st.sidebar.text_input("Pool 1 Transaction Fee (Rate)",0.0005)
+pool1_txn_fee = float(st.sidebar.text_input("Pool 1 Transaction Fee (Rate)",0.0005))
 
 st.sidebar.markdown(
     '[Back to Main Page (mydiamondhands)](https://mydiamondhands.io/)',
@@ -448,32 +448,33 @@ if st.button("Run Analysis"):
 
         
         # Build Minimum Investment Breakout Table
-        st.subheader('Minimum Investment CalculationBreakout')
+        st.subheader('Minimum Investment Calculation Breakout')
         last_sample_ds = both_pools.iloc[-1]
         last_sample_ds_pred = df_min.iloc[-1]
 
-        A = 1/last_sample_ds['p0.weth_to_usd_ratio']    # Pool 0 ETH / USDC
-        B = 0.005                                        # Pool 0 Transaction Fee
-        C = last_sample_ds['p0.gas_fees_usd']           # Pool 0 Gas Fees
-        D = 1/last_sample_ds['p1.weth_to_usd_ratio']    # Pool 1 ETH / USDC
-        E = 0.03                                        # Pool 1 Transaction Fee
-        F = last_sample_ds['p1.gas_fees_usd']           # Pool 1 Gas Fees
-        G = last_sample_ds['percent_change']            # Percent Change in Transaction Price
-        H = last_sample_ds['total_gas_fees_usd']        # Total Gas Fees
-        J = last_sample_ds_pred['percent_change_prediction']
-        K = last_sample_ds_pred['gas_fees_prediction']
+        A = f"{1/last_sample_ds['p0.weth_to_usd_ratio']:.2f}"    # Pool 0 ETH / USDC
+        B = f"{pool0_txn_fee:.5f}"                               # Pool 0 Transaction Fee
+        C = f"{last_sample_ds['p0.gas_fees_usd']:.2f}"           # Pool 0 Gas Fees
+        D = f"{1/last_sample_ds['p1.weth_to_usd_ratio']:.2f}"    # Pool 1 ETH / USDC
+        E = f"{pool1_txn_fee:.5f}"                               # Pool 1 Transaction Fee
+        F = f"{last_sample_ds['p1.gas_fees_usd']:.2f}"           # Pool 1 Gas Fees
+        G = f"{last_sample_ds['percent_change']:.5f}"            # Percent Change in Transaction Price
+        H = f"{last_sample_ds['total_gas_fees_usd']:.2f}"       # Total Gas Fees
+        J = f"{last_sample_ds_pred['percent_change_prediction']:.5f}"
+        K = f"{last_sample_ds_pred['gas_fees_prediction']:.2f}"
 
         L = last_sample_ds['total_gas_fees_usd'] / \
                     (
                         (1 + abs(last_sample_ds['percent_change'])) * (1 - 0.003 if last_sample_ds['percent_change'] < 0 else 1 - 0.0005) -
                         (1 - 0.0005 if last_sample_ds['percent_change'] < 0 else 1 - 0.003)
                     )
+        L = f"{L:.2f}"
         M = last_sample_ds_pred['gas_fees_prediction'] / \
                     (
                         (1 + abs(last_sample_ds_pred['percent_change_prediction'])) * (1 - 0.003 if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - 0.0005) -
                         (1 - 0.0005 if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - 0.003)
                     )
-
+        M = f"{M:.2f}"
         
         table_dict = {
             'Last Transaction': [A, B, C, D, E, F, G, H, L],
@@ -494,8 +495,8 @@ if st.button("Run Analysis"):
         # Convert the dictionary to a DataFrame
         table_df = pd.DataFrame(table_dict)
         table_df.set_index('Index', inplace=True)
-        table_df['Last Transaction'] = table_df['Last Transaction'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
-        table_df['Predicted'] = table_df['Predicted'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
+        #table_df['Last Transaction'] = table_df['Last Transaction'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
+        #table_df['Predicted'] = table_df['Predicted'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
 
         st.table(table_df)
 
