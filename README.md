@@ -17,8 +17,13 @@ A simple Streamlit app template for you to modify!
    python -m unittest tests.test_app   
    ```
 
-3. Run the app
+3. Run the basic streamlit app for exploring arbitrage basics
 
    ```
-   $ streamlit run src/streamlit_app.py
+   $ streamlit run src/streamlit_arbitrage_playground.py
+   ```
+
+4. Run a streamlit app to provide a 1 minute forecast on arbitrage opportunities, and some analysis of the last 12 hours of transactions.
+   ```
+   $ streamlit run src/streamlit_arbitrage_app.py
    ```
