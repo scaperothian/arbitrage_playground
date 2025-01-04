@@ -127,6 +127,26 @@ def merge_pool_data(p0,p1):
     both_pools.dropna(inplace=True)
     return both_pools
 
+def find_closest_timestamp(df, time_col, label_key, minutes):
+    # Ensure 'time' column is in datetime format
+    df.loc[:, time_col] = pd.to_datetime(df[time_col])
+
+    # Create a shifted version of the DataFrame with the target times
+    shifted_df = df.copy()
+    shifted_df[time_col] = shifted_df[time_col] - pd.Timedelta(minutes=minutes)
+
+    # Merge the original DataFrame with the shifted DataFrame on the closest timestamps
+    result_df = pd.merge_asof(df.sort_values(by=time_col),
+                              shifted_df.sort_values(by=time_col),
+                              on=time_col,
+                              direction='forward',
+                              suffixes=('', '_label'))
+
+    # Select the required columns and rename them
+    result_df = result_df[[time_col,label_key,label_key+'_label']]
+
+    return result_df
+
 def LGBM_Preprocessing(both_pools, forecast_window_min=10):
     """
     Creating evaluation data from the pool.  The model for LGBM is predicting percent_change
@@ -141,7 +161,9 @@ def LGBM_Preprocessing(both_pools, forecast_window_min=10):
     """
     int_df = both_pools.copy()
     int_df = int_df[['time','percent_change']]
-    int_df = shift_column_by_time(int_df, 'time', 'percent_change', forecast_window_min)
+    int_df = find_closest_timestamp(int_df, 'time', 'percent_change', forecast_window_min)
+
+    #int_df = shift_column_by_time(int_df, 'time', 'percent_change', forecast_window_min)
     num_lags = 2  # Number of lags to create
     for i in range(1, num_lags + 1):
         int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
@@ -158,7 +180,8 @@ def LGBM_Preprocessing(both_pools, forecast_window_min=10):
 def XGB_preprocessing(both_pools, forecast_window_min=10):
     int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
     int_df = int_df[['time','total_gas_fees_usd']]
-    df_3M = shift_column_by_time(int_df, 'time', 'total_gas_fees_usd', forecast_window_min)
+
+    df_3M = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', forecast_window_min)
     df_3M.index = df_3M.pop('time')
     df_3M.index = pd.to_datetime(df_3M.index)
 
@@ -179,34 +202,6 @@ def XGB_preprocessing(both_pools, forecast_window_min=10):
        'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
 
     return df_nan, X_gas_test, y_gas_test
-
-def shift_column_by_time(df, time_col, value_col, shift_minutes):
-    """
-    The purpose of this method is to create a shifted set of columns
-    that will act as labels downstream model.
-
-    Returns: the same df with an additional column f"{value_col}_label"
-    """
-    # Ensure 'time_col' is in datetime format
-    df[time_col] = pd.to_datetime(df[time_col])
-    
-    # Sort the DataFrame by time
-    df = df.sort_values(by=time_col).reset_index(drop=True)
-    
-    # Create an empty column for the shifted values
-    df[f'{value_col}_label'] = None
-
-    # Iterate over each row and find the appropriate value at least shift_minutes minutes later
-    for i in range(len(df)):
-        current_time = df.loc[i, time_col]
-        future_time = current_time + pd.Timedelta(minutes=shift_minutes)
-        
-        # Find the first row where the time is greater than or equal to the future_time
-        future_row = df[df[time_col] >= future_time]
-        if not future_row.empty:
-            df.at[i, f'{value_col}_label'] = future_row.iloc[0][value_col]
-    
-    return df
 
 def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
 
