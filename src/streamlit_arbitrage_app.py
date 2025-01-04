@@ -22,7 +22,7 @@ sns.set_style('darkgrid')
 
 import arbutils
 
-st.set_page_config(page_title="Arbitrage Playground", page_icon=None, layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Arbitrage Recommender", page_icon=None, layout="centered", initial_sidebar_state="collapsed")
 
 FORECAST_WINDOW_MIN=1
 
