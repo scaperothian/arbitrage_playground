@@ -263,6 +263,52 @@ if st.button("Run Analysis"):
 
                     # ##########################################################################
                     #
+                    #  Section 3: Recommended investment based on latest transactions.
+                    #
+                    # ##########################################################################
+                    st.subheader(f'Recommended Minimum Investment Prediction ({FORECAST_WINDOW_MIN} minute forecast)')
+
+                    # Predictions
+                    df_final_LGBM_X_test_dates = df_final_LGBM_X_test['time']
+                    df_final_LGBM_X_test = df_final_LGBM_X_test[['percent_change', 'rolling_mean_8', 'lag_1', 'lag_2']]
+                    y_final_pct_pred = LGBM.predict(df_final_LGBM_X_test, num_iteration=LGBM.best_iteration)
+                    y_final_gas_pred = XGB.predict(df_final_XGB_X_test)
+                    
+                    df_min = final_min_amt_invest(df_final_LGBM_X_test_dates, y_final_pct_pred, df_final_XGB_X_test.index, y_final_gas_pred)
+                    #import pdb
+                    #pdb.set_trace()
+                    now = datetime.now()
+
+                    # Difference between current time and last timestamp
+                    time_difference = now - df_min['time'].iloc[-1]
+
+                    # Check if the difference is less than FORCAST_WINDOW_MIN minutes
+                    is_less_than_x_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
+                    x_minutes = timedelta(minutes=FORECAST_WINDOW_MIN)
+                    if is_less_than_x_minutes:
+                        if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
+                            st.write(f'Arbitrage Opportunity is not expected {FORECAST_WINDOW_MIN} minute(s) from now.')
+                        else:
+                            if df_min['percent_change_prediction'].iloc[-1] < 0:
+                                st.write(f'**BUY**: Pool 0 ({pool0_address})')
+                                st.write(f'**SELL**: Pool 1 ({pool1_address})')
+                                st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
+                            else:
+                                st.write(f'**BUY**: Pool 1 ({pool1_address})')
+                                st.write(f'**SELL**: Pool 0 ({pool0_address})')
+                                st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
+                        
+                            st.write(
+                                    "*Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected).*"
+                            )                                
+                    else:
+                        st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {FORECAST_WINDOW_MIN} minute(s) old, unable to provide minimum amount to invest")
+                    
+
+
+
+                    # ##########################################################################
+                    #
                     #  Section 1: Rollup stats from past transactions
                     #
                     # ##########################################################################
@@ -275,15 +321,15 @@ if st.button("Run Analysis"):
                     st.write(f"Number of Transactions: {number_of_simulated_swaps}")
                     st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
                     st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
-
+                    st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
+                    st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
+                    
                     st.write("""*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
                              using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
                              that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
                              pool to use which impacts performance.*
                              """)
-                    st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
-                    st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
-                    
+
                     #TODO: attempt to understand how really large price flucuations should be taken into account for 
                     #      scenarios where there is losses (i.e. profit is largely negative - greater than 100000 as calculated).
                     #      But you can't loose more money than you put in, so what's wrong with the calculus?
@@ -376,56 +422,14 @@ if st.button("Run Analysis"):
                     # Display the figure in Streamlit
                     st.pyplot(fig2)
 
-                    # ##########################################################################
-                    #
-                    #  Section 3: Recommended investment based on latest transactions.
-                    #
-                    # ##########################################################################
-                    st.subheader(f'Recommended Minimum Investment Prediction ({FORECAST_WINDOW_MIN} minute forecast)')
-
-                    # Predictions
-                    df_final_LGBM_X_test_dates = df_final_LGBM_X_test['time']
-                    df_final_LGBM_X_test = df_final_LGBM_X_test[['percent_change', 'rolling_mean_8', 'lag_1', 'lag_2']]
-                    y_final_pct_pred = LGBM.predict(df_final_LGBM_X_test, num_iteration=LGBM.best_iteration)
-                    y_final_gas_pred = XGB.predict(df_final_XGB_X_test)
                     
-                    df_min = final_min_amt_invest(df_final_LGBM_X_test_dates, y_final_pct_pred, df_final_XGB_X_test.index, y_final_gas_pred)
-                    #import pdb
-                    #pdb.set_trace()
-                    now = datetime.now()
-
-                    # Difference between current time and last timestamp
-                    time_difference = now - df_min['time'].iloc[-1]
-
-                    # Check if the difference is less than FORCAST_WINDOW_MIN minutes
-                    is_less_than_x_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
-                    x_minutes = timedelta(minutes=FORECAST_WINDOW_MIN)
-                    if is_less_than_x_minutes:
-                        if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
-                            st.write(f'Arbitrage Opportunity is not expected {FORECAST_WINDOW_MIN} minute(s) from now.')
-                        else:
-                            if df_min['percent_change_prediction'].iloc[-1] < 0:
-                                st.write(f'**BUY**: Pool 0 ({pool0_address})')
-                                st.write(f'**SELL**: Pool 1 ({pool1_address})')
-                                st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
-                            else:
-                                st.write(f'**BUY**: Pool 1 ({pool1_address})')
-                                st.write(f'**SELL**: Pool 0 ({pool0_address})')
-                                st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
-                                
-                    else:
-                        st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {FORECAST_WINDOW_MIN} minute(s) old, unable to provide minimum amount to invest")
-                    
-
 
                     
                     
                 else:
                     st.error("Cannot proceed with final processing. Some model predictions are missing.")
 
-        st.write(
-            "*Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected).*"
-        )
+
 
         # ##########################################################################
         #
