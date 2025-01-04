@@ -62,7 +62,7 @@ def find_closest_timestamp(df, time_col, label_key, minutes):
     result_df = pd.merge_asof(df.sort_values(by=time_col),
                               shifted_df.sort_values(by=time_col),
                               on=time_col,
-                              direction='backward',
+                              direction='forward',
                               suffixes=('', '_label'))
 
     # Select the required columns and rename them
@@ -90,10 +90,11 @@ def create_gas_fees_splits(df_input, params):
     
     int_df[f'rolling_mean_{N_WINDOW_AVERAGE}'] = int_df['total_gas_fees_usd'].rolling(window=N_WINDOW_AVERAGE).mean()
     int_df[f'rolling_mean_{N_WINDOW_AVERAGE*2}'] = int_df['total_gas_fees_usd'].rolling(window=N_WINDOW_AVERAGE*2).mean()
+    int_df.dropna(inplace=True)
 
     # prune excess rows from lagging operation
-    max_prune = max(N_WINDOW_AVERAGE*2,NUM_LAGS)
-    int_df = int_df.iloc[max_prune:]
+    #max_prune = max(N_WINDOW_AVERAGE*2,NUM_LAGS)
+    #int_df = int_df.iloc[max_prune:]
 
     
     has_nans = int_df.isna().any().any()
@@ -135,10 +136,11 @@ def create_pct_change_splits(df_input, params):
         int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
     
     int_df[f'rolling_mean_{N_WINDOW_AVERAGE}'] = int_df['percent_change'].rolling(window=N_WINDOW_AVERAGE).mean()
-    
+    int_df.dropna(inplace=True)
+
     # prune excess rows from lagging operation
-    max_prune = max(N_WINDOW_AVERAGE,NUM_LAGS)
-    int_df = int_df.iloc[max_prune:]
+    #max_prune = max(N_WINDOW_AVERAGE,NUM_LAGS)
+    #int_df = int_df.iloc[max_prune:]
 
     
     has_nans = int_df.isna().any().any()
@@ -236,7 +238,7 @@ if __name__ == "__main__":
     # CONFIGURABLE PARAMETERS
     # ################################
     params = {
-        'FORECAST_WINDOW_MIN':10,
+        'FORECAST_WINDOW_MIN':1,
         'TRAINING_DATA_PATH':"../../arbitrage_3M/",
         'MODEL_PATH':"../models/",
         # PCT_CHANGE model parameters (things that can be ablated using the same data)
