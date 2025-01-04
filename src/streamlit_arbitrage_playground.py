@@ -35,7 +35,7 @@ def generate_plot(investment, profit):
     fig, ax = plt.subplots()
     ax.plot(investment, profit, label="profit")
     ax.legend()
-    ax.axhline(y=profit[-1], color='black', linestyle='--', label=f'Max Profit = {profit[-1]}')
+    #ax.axhline(y=profit[-1], color='black', linestyle='--', label=f'Max Profit = {profit[-1]}')
     ax.set_ylabel("Estimated Profit (number of tokens)")
     ax.set_xlabel("Initial Investment (number of tokens)")
     ax.set_title("Profit from Liquidity Pools")

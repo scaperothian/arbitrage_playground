@@ -1,5 +1,6 @@
 import unittest
 import pandas as pd
+import numpy as np
 
 from src.arbutils import load_model, etherscan_request, merge_pool_data, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
 
@@ -122,21 +123,179 @@ class TestAppMethods(unittest.TestCase):
         print(f"test_model_pricing_inference: R² Score: {r2:.4f}")
 
         self.assertEqual(None,None)
-
+    
 
     def test_min_investment_scenario_1(self):
+        """
+        T0 > T1, positive outcome
+
+        |ΔP| > (1-T0)/(1-T1) - 1
+        
+        where T0 is the transaction fee on the first transaction
+              T1 is the transaction fee on the second transaction
+
+        Note: 
+            percent_change is defined as (P0 - P1) / min(P0,P1), 
+
+            if percent_change is positive then P0 > P1 and 
+                first transaction is on pool 1
+                second transaction is on pool 0 and 
+            if percent_change is negative then P1 > P0 and 
+                first transaction is on pool 0 
+                second transaction is on pool 1 
+        
+        where P0 is token price in pool 0, P1 is token price in pool 1
+        """
         GAS_FEES_COL_NAME = 'total_gas_fees'
         PERCENT_CHANGE_COL_NAME = 'percent_change'
+        POOL0_TXN_FEE_COL_NAME = 'pool0_txn_fee'
+        POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
         
+        # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
         test_dict = {
-            GAS_FEES_COL_NAME:[50],
-            PERCENT_CHANGE_COL_NAME:[0.03],
+            GAS_FEES_COL_NAME:[20],
+            PERCENT_CHANGE_COL_NAME:[0.321],
+            POOL0_TXN_FEE_COL_NAME:[0.1],
+            POOL1_TXN_FEE_COL_NAME:[0.3]
         }
 
-        df = calculate_min_investment(pd.DataFrame(test_dict),GAS_FEES_COL_NAME,PERCENT_CHANGE_COL_NAME,min_investment_col='min_amount_to_invest')
-        #print(df)
-        self.assertEqual(df['min_amount_to_invest'],1539.171926)
+        df = calculate_min_investment(pd.DataFrame(test_dict),
+                                        POOL0_TXN_FEE_COL_NAME,
+                                        POOL1_TXN_FEE_COL_NAME,
+                                        GAS_FEES_COL_NAME,
+                                        PERCENT_CHANGE_COL_NAME,
+                                        min_investment_col='min_amount_to_invest')
+        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],40.908161,places=6)
 
+    def test_min_investment_scenario_2(self):
+        """
+        T1 > T0, positive outcome
+
+        |ΔP| > (1-T0)/(1-T1) - 1
+        
+        where T0 is the transaction fee on the first transaction
+              T1 is the transaction fee on the second transaction
+
+        Note: 
+            percent_change is defined as (P0 - P1) / min(P0,P1), 
+
+            if percent_change is positive then P0 > P1 and 
+                first transaction is on pool 1
+                second transaction is on pool 0 and 
+            if percent_change is negative then P1 > P0 and 
+                first transaction is on pool 0 
+                second transaction is on pool 1 
+        
+        where P0 is token price in pool 0, P1 is token price in pool 1
+        """
+        GAS_FEES_COL_NAME = 'total_gas_fees'
+        PERCENT_CHANGE_COL_NAME = 'percent_change'
+        POOL0_TXN_FEE_COL_NAME = 'pool0_txn_fee'
+        POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
+        
+        # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
+        print(f"T1 > T0, and percent_change ({0.321}) is greater than {(1-0.1)/(1-0.3)-1}")
+        test_dict = {
+            GAS_FEES_COL_NAME:[20],
+            PERCENT_CHANGE_COL_NAME:[0.321],
+            POOL0_TXN_FEE_COL_NAME:[0.3],
+            POOL1_TXN_FEE_COL_NAME:[0.1]
+        }
+
+        df = calculate_min_investment(pd.DataFrame(test_dict),
+                                        POOL0_TXN_FEE_COL_NAME,
+                                        POOL1_TXN_FEE_COL_NAME,
+                                        GAS_FEES_COL_NAME,
+                                        PERCENT_CHANGE_COL_NAME,
+                                        min_investment_col='min_amount_to_invest')
+        
+        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],809.716599,places=6)
+
+    def test_min_investment_scenario_3(self):
+        """
+        T1 > T0, negative outcome
+
+        |ΔP| < (1-T0)/(1-T1) - 1
+        
+        where T0 is the transaction fee on the first transaction
+              T1 is the transaction fee on the second transaction
+
+        Note: 
+            percent_change is defined as (P0 - P1) / min(P0,P1), 
+
+            if percent_change is positive then P0 > P1 and 
+                first transaction is on pool 1
+                second transaction is on pool 0 and 
+            if percent_change is negative then P1 > P0 and 
+                first transaction is on pool 0 
+                second transaction is on pool 1 
+        
+        where P0 is token price in pool 0, P1 is token price in pool 1
+        """
+        GAS_FEES_COL_NAME = 'total_gas_fees'
+        PERCENT_CHANGE_COL_NAME = 'percent_change'
+        POOL0_TXN_FEE_COL_NAME = 'pool0_txn_fee'
+        POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
+        
+        # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
+        print(f"T1 > T0, and percent_change ({0.0321}) is less than {(1-0.1)/(1-0.3)-1}")
+        test_dict = {
+            GAS_FEES_COL_NAME:[20],
+            PERCENT_CHANGE_COL_NAME:[0.0321],
+            POOL0_TXN_FEE_COL_NAME:[0.3],
+            POOL1_TXN_FEE_COL_NAME:[0.1]
+        }
+
+        df = calculate_min_investment(pd.DataFrame(test_dict),
+                                        POOL0_TXN_FEE_COL_NAME,
+                                        POOL1_TXN_FEE_COL_NAME,
+                                        GAS_FEES_COL_NAME,
+                                        PERCENT_CHANGE_COL_NAME,
+                                        min_investment_col='min_amount_to_invest')
+        
+        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],np.nan,places=6)
+
+    def test_min_investment_scenario_4(self):
+        """
+        |ΔP| = (1-T0)/(1-T1) - 1, infinite outcome
+        
+        where T0 is the transaction fee on the first transaction
+              T1 is the transaction fee on the second transaction
+
+        Note: 
+            percent_change is defined as (P0 - P1) / min(P0,P1), 
+
+            if percent_change is positive then P0 > P1 and 
+                first transaction is on pool 1
+                second transaction is on pool 0 and 
+            if percent_change is negative then P1 > P0 and 
+                first transaction is on pool 0 
+                second transaction is on pool 1 
+        
+        where P0 is token price in pool 0, P1 is token price in pool 1
+        """
+        GAS_FEES_COL_NAME = 'total_gas_fees'
+        PERCENT_CHANGE_COL_NAME = 'percent_change'
+        POOL0_TXN_FEE_COL_NAME = 'pool0_txn_fee'
+        POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
+        
+        # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
+        print(f"T1 > T0, and percent_change ({0.0321}) is equal to {(1-0.1)/(1-0.3)-1}")
+        test_dict = {
+            GAS_FEES_COL_NAME:[20],
+            PERCENT_CHANGE_COL_NAME:[(1-0.1)/(1-0.3)-1],
+            POOL0_TXN_FEE_COL_NAME:[0.3],
+            POOL1_TXN_FEE_COL_NAME:[0.1]
+        }
+
+        df = calculate_min_investment(pd.DataFrame(test_dict),
+                                        POOL0_TXN_FEE_COL_NAME,
+                                        POOL1_TXN_FEE_COL_NAME,
+                                        GAS_FEES_COL_NAME,
+                                        PERCENT_CHANGE_COL_NAME,
+                                        min_investment_col='min_amount_to_invest')
+        
+        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],np.nan,places=6)
 
 if __name__ == "__main__":
     unittest.main()
