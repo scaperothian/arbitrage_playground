@@ -26,7 +26,7 @@ st.set_page_config(page_title="Arbitrage Recommender", page_icon=None, layout="c
 
 FORECAST_WINDOW_MIN=1
 
-st.title("Arbitrage Playground")
+st.title("Arbitrage Recommender")
 st.write(
     "Use this app to experiment with different cross-liquidity pool arbitrage scenarios in WETH/USDC liquidity pools. Enter an Etherscan API key, your budget,  and click run to simulate performance."
 )
