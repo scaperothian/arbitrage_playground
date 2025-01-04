@@ -225,34 +225,50 @@ def calculate_min_investment_legacy(df,gas_fee_col,percent_change_col,min_invest
 
 
 def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
-    """
-    adds min_investment_col to a dataframe df.
-    """
-    # Assumption: 
+
     # Percent Change is defined as P0 - P1 / min(P0,P1), 
     # where P0 is price of token in pool 0, P1 is price of token in pool 1.
     #
+    # if percent_change (or ΔP) is positive then P0 > P1 and 
+    #            first transaction is on pool 1
+    #            second transaction is on pool 0 and 
+    # if percent_change (or ΔP) is negative then P1 > P0 and 
+    #            first transaction is on pool 0 
+    #            second transaction is on pool 1 
+    # 
     # Minimum Investment is defined as: G / [ (1+|ΔP|) x (1-T1) - (1-T0) ]
     # where ΔP is real, 0 < T1 < 1, 0 < T0 < 1 
-    # and   T0 is transaction fees for Pool 0, T1 is transaction fees for Pool 1.
-
+    #       T0 is transaction fees for first pool transaction, T1 is transaction fees for second pool transaction.
+    #       Note: use the pool with the smallest price for the first pool transaction
+    #
     # To calculate the minimum investment, you must generate two terms conditional on the 
-    # pool that is greater, which can be determined based on the sign.  if percent_change 
-    # is positive then P0 > P1 and transaction 1 is P1, if percent_change is negative then 
-    # P1 > P0 and transaction 1 is P0.
-    # 
-    # The first term is (1+ΔP) x (1 - T1)
-    # 
+    # pool that is greater, which can be determined based on the sign.  
+    #         
+    # The first term is (1+ΔP) x (1 - T1) 
     # The second term is (1 - T0) 
+    #
+    # The minimum investment (using the two terms in the denominator) can have different outcomes depending 
+    # on the configuration: 
+    #    T0 > T1, positive outcome regardless of ΔP
+    #    T1 > T0, negative outcome if |ΔP| < (1-T0)/(1-T1) - 1
+    #    T1 > T0, positive outcome if |ΔP| > (1-T0)/(1-T1) - 1
+    def min_investment(row):
+        result = row[gas_fee_col] / (
+            (1 + abs(row[percent_change_col])) *
+            (1 - row[pool1_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool0_txn_fee_col]) -
+            (1 - row[pool0_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool1_txn_fee_col])
+        )
+        if not np.isfinite(result):  # Check for inf or NaN
+            return np.nan
+        
+        return result
 
-    df[min_investment_col] = df.apply(
-        lambda row: row[gas_fee_col] /
-                    (
-                        (1 + abs(row[percent_change_col])) * (1 - row[pool1_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool0_txn_fee_col]) -
-                        (1 - row[pool0_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool1_txn_fee_col])
-                    ),
-        axis=1
-    )
+    df[min_investment_col] = df.apply(min_investment, axis=1)
+
+
+    # if the value in the dataframe is negative or inf, set the minimum investment to NaN to indicate 
+    # ΔP is not large enough to overcome transaction fees or other race conditions.
+    df[min_investment_col] = np.where(df[min_investment_col] < 0, np.nan, df[min_investment_col])
 
     return df
 
