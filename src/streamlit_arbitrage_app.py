@@ -72,7 +72,7 @@ def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas
     df_final = pd.merge(df_percent_change, df_gas, how = 'left', on = 'time')
     df_final = df_final.dropna()
 
-    df_final = arbutils.calculate_min_investment(df_final, 
+    df_final = arbutils.calculate_min_investment_legacy(df_final, 
                                         gas_fee_col='gas_fees_prediction', 
                                         percent_change_col='percent_change_prediction', 
                                         min_investment_col='min_amount_to_invest_prediction')

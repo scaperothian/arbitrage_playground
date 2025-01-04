@@ -208,7 +208,7 @@ def shift_column_by_time(df, time_col, value_col, shift_minutes):
     
     return df
 
-def calculate_min_investment(df,gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
+def calculate_min_investment_legacy(df,gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
     """
     adds min_investment_col to a dataframe df.
     """
@@ -217,6 +217,39 @@ def calculate_min_investment(df,gas_fee_col,percent_change_col,min_investment_co
                     (
                         (1 + abs(row[percent_change_col])) * (1 - 0.003 if row[percent_change_col] < 0 else 1 - 0.0005) -
                         (1 - 0.0005 if row[percent_change_col] < 0 else 1 - 0.003)
+                    ),
+        axis=1
+    )
+
+    return df
+
+
+def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
+    """
+    adds min_investment_col to a dataframe df.
+    """
+    # Assumption: 
+    # Percent Change is defined as P0 - P1 / min(P0,P1), 
+    # where P0 is price of token in pool 0, P1 is price of token in pool 1.
+    #
+    # Minimum Investment is defined as: G / [ (1+|ΔP|) x (1-T1) - (1-T0) ]
+    # where ΔP is real, 0 < T1 < 1, 0 < T0 < 1 
+    # and   T0 is transaction fees for Pool 0, T1 is transaction fees for Pool 1.
+
+    # To calculate the minimum investment, you must generate two terms conditional on the 
+    # pool that is greater, which can be determined based on the sign.  if percent_change 
+    # is positive then P0 > P1 and transaction 1 is P1, if percent_change is negative then 
+    # P1 > P0 and transaction 1 is P0.
+    # 
+    # The first term is (1+ΔP) x (1 - T1)
+    # 
+    # The second term is (1 - T0) 
+
+    df[min_investment_col] = df.apply(
+        lambda row: row[gas_fee_col] /
+                    (
+                        (1 + abs(row[percent_change_col])) * (1 - row[pool1_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool0_txn_fee_col]) -
+                        (1 - row[pool0_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool1_txn_fee_col])
                     ),
         axis=1
     )
