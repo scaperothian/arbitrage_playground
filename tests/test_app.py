@@ -1,3 +1,4 @@
+import math
 import unittest
 import pandas as pd
 import numpy as np
@@ -15,8 +16,8 @@ api_key = "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2"
 pool0_address = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
-price_model_name = "LGBM_Percent_Change_v1"
-gasfee_model_name = "XGB_Gas_Prices_v2"
+price_model_name = "percent_change_1min_forecast_LGBM"
+gasfee_model_name = "gas_fees_1min_forecast_XGBoost"
 
 class TestAppMethods(unittest.TestCase):
     
@@ -253,7 +254,7 @@ class TestAppMethods(unittest.TestCase):
                                         PERCENT_CHANGE_COL_NAME,
                                         min_investment_col='min_amount_to_invest')
         
-        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],np.nan,places=6)
+        self.assertTrue(math.isnan(df.iloc[0]['min_amount_to_invest']))
 
     def test_min_investment_scenario_4(self):
         """
@@ -294,8 +295,7 @@ class TestAppMethods(unittest.TestCase):
                                         GAS_FEES_COL_NAME,
                                         PERCENT_CHANGE_COL_NAME,
                                         min_investment_col='min_amount_to_invest')
-        
-        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],np.nan,places=6)
+        self.assertTrue(math.isnan(df.iloc[0]['min_amount_to_invest']))
 
 if __name__ == "__main__":
     unittest.main()

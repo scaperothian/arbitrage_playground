@@ -208,22 +208,6 @@ def shift_column_by_time(df, time_col, value_col, shift_minutes):
     
     return df
 
-def calculate_min_investment_legacy(df,gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
-    """
-    adds min_investment_col to a dataframe df.
-    """
-    df[min_investment_col] = df.apply(
-        lambda row: row[gas_fee_col] /
-                    (
-                        (1 + abs(row[percent_change_col])) * (1 - 0.003 if row[percent_change_col] < 0 else 1 - 0.0005) -
-                        (1 - 0.0005 if row[percent_change_col] < 0 else 1 - 0.003)
-                    ),
-        axis=1
-    )
-
-    return df
-
-
 def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
 
     # Percent Change is defined as P0 - P1 / min(P0,P1), 

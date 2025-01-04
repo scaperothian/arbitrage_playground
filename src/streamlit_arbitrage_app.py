@@ -58,11 +58,13 @@ def XGB_preprocessing(both_pools, forecast_window_min=10):
 def merge_pool_data(p0,p1):
     return arbutils.merge_pool_data(p0,p1)
     
-def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas_pred):
+def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas_pred,pool0_txn_fees,pool1_txn_fees):
     df_percent_change = pd.DataFrame({
         'time': dates_test,
         'percent_change_actual': y_test,
-        'percent_change_prediction': test_predictions
+        'percent_change_prediction': test_predictions,
+        #'pool0_txn_fees':pool0_txn_fees,
+        #'pool1_txn_fees':pool1_txn_fees,
     })
     
     df_gas = y_gas_test.to_frame()
@@ -70,20 +72,62 @@ def Final_results_processing(dates_test,y_test,test_predictions,y_gas_test,y_gas
     df_gas['gas_fees_prediction'] = y_gas_pred
     
     df_final = pd.merge(df_percent_change, df_gas, how = 'left', on = 'time')
+    df_final['pool0_txn_fees'] = pool0_txn_fees
+    df_final['pool1_txn_fees'] = pool1_txn_fees
+
     df_final = df_final.dropna()
 
-    df_final = arbutils.calculate_min_investment_legacy(df_final, 
+
+    df_final = arbutils.calculate_min_investment(df_final, 
+                                        pool0_txn_fee_col='pool0_txn_fees',
+                                        pool1_txn_fee_col='pool1_txn_fees',
                                         gas_fee_col='gas_fees_prediction', 
                                         percent_change_col='percent_change_prediction', 
                                         min_investment_col='min_amount_to_invest_prediction')
     
-    df_final['Profit'] = df_final.apply(
-        lambda row: (row['min_amount_to_invest_prediction'] * 
-                     (1 + row['percent_change_actual']) * (1 - 0.003 if row['percent_change_prediction'] < 0 else 1 - 0.0005) -
-                     row['min_amount_to_invest_prediction'] * (1 - 0.0005 if row['percent_change_prediction'] < 0 else 1 - 0.003) -
-                     row['total_gas_fees_usd_label']),
-        axis=1
-    )
+
+
+    #df_final['Profit'] = df_final.apply(
+    #    lambda row: (threshold * 
+    #                 (1 + row['percent_change_actual']) * (1 - pool1_txn_fee if row['percent_change_prediction'] < 0 else 1 - pool0_txn_fee) -
+    #                 threshold * (1 - pool0_txn_fee if row['percent_change_prediction'] < 0 else 1 - pool1_txn_fee) -
+    #                 row['total_gas_fees_usd_label']),
+    #    axis=1
+    #)
+
+    def calculate_profit(row):
+        """
+        Calculate profit for a given row.
+        """
+        try:
+            # if the model guesses the sign on the percent change wrong, the result is
+            # a loss in return.
+            if np.sign(row['percent_change_actual']) == np.sign(row['percent_change_prediction']):
+                SIGN = 1.0
+            else: 
+                SIGN = -1.0
+
+            # Calculate the profit.
+            profit = (
+                threshold * 
+                (1 + SIGN * np.abs(row['percent_change_actual'])) * 
+                (1 - pool1_txn_fee if row['percent_change_prediction'] < 0 else 1 - pool0_txn_fee) -
+                threshold * 
+                (1 - pool0_txn_fee if row['percent_change_prediction'] < 0 else 1 - pool1_txn_fee) -
+                row['total_gas_fees_usd_label']
+            )
+            return profit
+        except Exception as e:
+            # Handle any unexpected errors
+            print(f"Error calculating profit for row: {row}, Error: {e}")
+            return np.nan
+
+    # Use apply with the standalone function
+    df_final['Profit'] = df_final.apply(calculate_profit, axis=1)
+
+
+    #import pdb
+    #pdb.set_trace()
     
     return df_final
 
@@ -103,8 +147,8 @@ def final_min_amt_invest(dates_test, test_predictions, index, gas_predictions):
     df_final['min_amount_to_invest_prediction'] = df_final.apply(
         lambda row: row['gas_fees_prediction'] /
                     (
-                        (1 + abs(row['percent_change_prediction'])) * (1 - 0.003 if row['percent_change_prediction'] < 0 else 1 - 0.0005) -
-                        (1 - 0.0005 if row['percent_change_prediction'] < 0 else 1 - 0.003)
+                        (1 + abs(row['percent_change_prediction'])) * (1 - pool1_txn_fee if row['percent_change_prediction'] < 0 else 1 - pool0_txn_fee) -
+                        (1 - pool0_txn_fee if row['percent_change_prediction'] < 0 else 1 - pool1_txn_fee)
                     ),
         axis=1
     )
@@ -159,8 +203,6 @@ if st.button("Run Analysis"):
         else:
             both_pools = merge_pool_data(p0, p1)
 
-       
-        
             # LGBM Preprocessing
             LGBM_org_data, df_final_LGBM_X_test, X_pct_test, y_pct_test = LGBM_Preprocessing(both_pools, FORECAST_WINDOW_MIN)
         
@@ -204,7 +246,7 @@ if st.button("Run Analysis"):
 
                 # Process final results
                 if y_pct_pred is not None and y_gas_pred is not None:
-                    df_final = Final_results_processing(LGBM_org_data['time'],y_pct_test,y_pct_pred,y_gas_test,y_gas_pred)
+                    df_final = Final_results_processing(LGBM_org_data['time'],y_pct_test,y_pct_pred,y_gas_test,y_gas_pred,pool0_txn_fee,pool1_txn_fee)
 
                     #print(df_final.columns)
 
@@ -212,8 +254,10 @@ if st.button("Run Analysis"):
                     avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
                     median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].median()
 
-                    avg_profit = df_final['Profit'].mean()
-                    med_profit = df_final['Profit'].median()
+                    avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+                                        & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
+                    med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+                                        & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
 
                     number_of_simulated_swaps = df_final.shape[0]
 
@@ -222,16 +266,30 @@ if st.button("Run Analysis"):
                     #  Section 1: Rollup stats from past transactions
                     #
                     # ##########################################################################
-                    df_gain = df_final[(df_final['Profit'] > 0) 
-                                        & (df_final['min_amount_to_invest_prediction'] > 0) 
+                    df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
                                         & (df_final['min_amount_to_invest_prediction'] < threshold)]
+                    
+                    df_gain = df_valid_txns[(df_valid_txns['Profit'] > 0)]
 
                     st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
                     st.write(f"Number of Transactions: {number_of_simulated_swaps}")
                     st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
                     st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
-                    st.write(f"Percent of Transactions with Profitable Arbitrage Opportunities: {df_gain.shape[0]/df_final.shape[0]*100:.1f}%")
-                    st.write(f"Median Profit Per Transaction (when gain is actualized): ${med_profit:.2f}")
+
+                    st.write("""*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
+                             using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
+                             that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
+                             pool to use which impacts performance.*
+                             """)
+                    st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
+                    st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
+                    
+                    #TODO: attempt to understand how really large price flucuations should be taken into account for 
+                    #      scenarios where there is losses (i.e. profit is largely negative - greater than 100000 as calculated).
+                    #      But you can't loose more money than you put in, so what's wrong with the calculus?
+                    #st.write(f"Average Return on Transactions with Detected Arbitrage Opportunites: ${avg_profit:.2f}")
+                    #st.write(f"Median Return on Transactions with Detected Arbitrage Opportunites: ${med_profit:.2f}")
+
 
                     st.subheader(f"Recommended Minimum Investment in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s).")
 
@@ -465,14 +523,14 @@ if st.button("Run Analysis"):
 
         L = last_sample_ds['total_gas_fees_usd'] / \
                     (
-                        (1 + abs(last_sample_ds['percent_change'])) * (1 - 0.003 if last_sample_ds['percent_change'] < 0 else 1 - 0.0005) -
-                        (1 - 0.0005 if last_sample_ds['percent_change'] < 0 else 1 - 0.003)
+                        (1 + abs(last_sample_ds['percent_change'])) * (1 - pool1_txn_fee if last_sample_ds['percent_change'] < 0 else 1 - pool0_txn_fee) -
+                        (1 - pool0_txn_fee if last_sample_ds['percent_change'] < 0 else 1 - pool1_txn_fee)
                     )
         L = f"{L:.2f}"
         M = last_sample_ds_pred['gas_fees_prediction'] / \
                     (
-                        (1 + abs(last_sample_ds_pred['percent_change_prediction'])) * (1 - 0.003 if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - 0.0005) -
-                        (1 - 0.0005 if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - 0.003)
+                        (1 + abs(last_sample_ds_pred['percent_change_prediction'])) * (1 - pool1_txn_fee if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - pool0_txn_fee) -
+                        (1 - pool0_txn_fee if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - pool1_txn_fee)
                     )
         M = f"{M:.2f}"
         
