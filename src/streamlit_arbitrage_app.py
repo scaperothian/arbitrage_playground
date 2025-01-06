@@ -35,13 +35,13 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
 
 # 
 @st.cache_data
-def percent_change_preprocessing(both_pools, forecast_window_min=10, objective='test', test_split=0.0):
-    return arbutils.LGBM_Preprocessing(both_pools, forecast_window_min, objective=objective, test_split=test_split)
+def percent_change_preprocessing(both_pools, forecast_window_min, objective='test', test_split=0.0):
+    return arbutils.LGBM_Preprocessing(both_pools, forecast_window_min=forecast_window_min, objective=objective, test_split=test_split)
 
 # 
 @st.cache_data
-def gas_fee_preprocessing(both_pools, forecast_window_min=10, objective='test', test_split=0.0):
-    return arbutils.XGB_preprocessing(both_pools, forecast_window_min, objective=objective, test_split=test_split)
+def gas_fee_preprocessing(both_pools, forecast_window_min, objective='test', test_split=0.0):
+    return arbutils.XGB_preprocessing(both_pools, forecast_window_min=forecast_window_min, objective=objective, test_split=test_split)
 
 @st.cache_data
 def merge_pool_data(p0,p1):
