@@ -190,7 +190,7 @@ st.write(
 )
 
 threshold = st.slider('Select Budget', min_value=1000, max_value=40000, value=10000, step=500)
-st.write(f'Selected Budget: {threshold}'
+st.write(f'Selected Budget: {threshold}')
 
 if st.button("Run Analysis"):
     with st.spinner("Fetching and processing data..."):
