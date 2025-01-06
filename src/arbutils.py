@@ -6,6 +6,9 @@ import requests
 import pandas as pd
 from datetime import datetime
 
+from sklearn.model_selection import train_test_split
+
+
 def etherscan_request(action, api_key, address, startblock=0, endblock=99999999, sort='desc'):
 
     """
@@ -147,17 +150,37 @@ def find_closest_timestamp(df, time_col, label_key, minutes):
 
     return result_df
 
-def LGBM_Preprocessing(both_pools, forecast_window_min=10):
+def LGBM_Preprocessing(both_pools, forecast_window_min=10, objective='train',test_split=0.2):
     """
     Creating evaluation data from the pool.  The model for LGBM is predicting percent_change
     across the two pools.  
 
-    Return: 
-    - int_df (nans dropped): all columns 'time','percent_change_label', 'percent_change','rolling_mean_8','lag_1','lag_2'
-    - df_nan: data frame with all columns as above, but only keeping the rows where the percent_change_label is nan.  
-                i.e. the first shift_minutes of data.
-    - X_pct_test - only the input features for LGBM.
-    - y_pct_test - only the labels column
+    input arguments:
+    - both_pools (dataframe): raw dataframe of merged pool pair.
+    - forecast_window_min: minutes to shift labels into the future.
+    - objective: train / test / inference objectives changes the output arguments.  
+                 train:
+                 objective makes train/test splits with labels.  
+                 test: 
+                 objective returns the labeled data without splitting
+                 inference:   
+                 takes the latest timestamps (in this case samples without labels) to use as input into a 
+                 trained model.  This is useful when pulling data and wanting to evaluate
+                 the data (use a test split of the data), then perform inference on the same 
+                 dataset just using a portion that is garunteed to not be used for training.
+    - test_split: the proportion of the dataset to include in the test split (opposed to training).
+                  therefore, 0.0 would be all training and 1.0 would be all test.  ignored if the 
+                  objective is inference.
+    
+    Return (inference): 
+    - (dataframe): data frame preserves all columns as int_df. i.e. the most recent shift_minutes of data.  
+   
+    Return (test): 
+    - X (dataframe with time index): model features
+    - y (dataframe with time index): labels   
+   
+    Return (train): 
+    - X_train, X_test, y_train, y_test (dataframe with time index): standard sklearn train/test splits
     """
     int_df = both_pools.copy()
     int_df = int_df[['time','percent_change']]
@@ -169,39 +192,84 @@ def LGBM_Preprocessing(both_pools, forecast_window_min=10):
         int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
     int_df['rolling_mean_8'] = int_df['percent_change'].rolling(window=8).mean()
     int_df = int_df[['time','percent_change_label', 'percent_change','rolling_mean_8','lag_1','lag_2']]
-    df_nan = int_df[int_df['percent_change_label'].isna()]
-    
-    int_df.dropna(inplace=True)
-    
-    X_pct_test = int_df[['percent_change','rolling_mean_8','lag_1','lag_2']]
-    y_pct_test = int_df['percent_change_label']
-    return int_df, df_nan, X_pct_test, y_pct_test
 
-def XGB_preprocessing(both_pools, forecast_window_min=10):
+    # Create time index for the dataframe to preserve timestamps with splits.
+    int_df.index = int_df.pop('time')
+    int_df.index = pd.to_datetime(int_df.index)
+
+    if objective == 'inference':
+        int_df = int_df[int_df['percent_change_label'].isna()]
+        
+        #remove labels from data in place.
+        int_df.pop('percent_change_label') 
+        return int_df
+    
+    elif objective == 'test':
+        int_df.dropna(inplace=True)
+
+        y = int_df.pop('percent_change_label')
+        X = int_df.copy()
+        return X,y
+            
+    elif objective == 'train':
+        int_df.dropna(inplace=True)
+
+        # Create labels and training...
+        y = int_df.pop('percent_change_label')
+        X = int_df.copy()
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_split, random_state=42,shuffle=False)
+        return X_train, X_test, y_train, y_test
+    else:
+        print(f"LGBM_Preprocessing: Error - wrong objective specified ({objective}). Should be train, test or inference")
+        return None
+
+def XGB_preprocessing(both_pools, forecast_window_min=10, objective='train', test_split=0.2):
     int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
     int_df = int_df[['time','total_gas_fees_usd']]
 
-    df_3M = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', forecast_window_min)
-    df_3M.index = df_3M.pop('time')
-    df_3M.index = pd.to_datetime(df_3M.index)
+    df_int = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', forecast_window_min)
+    df_int.index = df_int.pop('time')
+    df_int.index = pd.to_datetime(df_int.index)
 
     num_lags = 9  # Number of lags to create
     for i in range(1, num_lags + 1):
-        df_3M[f'lag_{i}'] = df_3M['total_gas_fees_usd'].shift(i)
+        df_int[f'lag_{i}'] = df_int['total_gas_fees_usd'].shift(i)
     
-    df_3M['rolling_mean_3'] = df_3M['total_gas_fees_usd'].rolling(window=3).mean()
-    df_3M['rolling_mean_6'] = df_3M['total_gas_fees_usd'].rolling(window=6).mean()
-    df_nan = df_3M[df_3M['total_gas_fees_usd_label'].isna()]
+    df_int['rolling_mean_3'] = df_int['total_gas_fees_usd'].rolling(window=3).mean()
+    df_int['rolling_mean_6'] = df_int['total_gas_fees_usd'].rolling(window=6).mean()
     
-    df_3M.dropna(inplace=True)
-    lag_features = [f'lag_{i}' for i in range(1, num_lags + 1)]
-    X_gas_test = df_3M[['total_gas_fees_usd']+lag_features + ['rolling_mean_3', 'rolling_mean_6']]
-    y_gas_test = df_3M['total_gas_fees_usd_label']
+    #lag_features = [f'lag_{i}' for i in range(1, num_lags + 1)]
+    #X_gas_test = df_int[['total_gas_fees_usd']+lag_features + ['rolling_mean_3', 'rolling_mean_6']]
+    #y_gas_test = df_int['total_gas_fees_usd_label']
     
-    df_nan = df_nan[['total_gas_fees_usd', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
-       'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
+    #df_nan = df_nan[['total_gas_fees_usd', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
+    #   'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
 
-    return df_nan, X_gas_test, y_gas_test
+    if objective == 'inference':
+        df_int = df_int[df_int['total_gas_fees_usd_label'].isna()]
+
+        #remove labels from data for inference.
+        df_int.pop('total_gas_fees_usd_label') 
+        return df_int
+    
+    elif objective == 'test':
+        df_int.dropna(inplace=True)
+
+        y = df_int.pop('total_gas_fees_usd_label')
+        X = df_int.copy()
+        return X,y
+            
+    elif objective == 'train':
+        int_df.dropna(inplace=True)
+
+        # Create labels and training...
+        y = df_int.pop('total_gas_fees_usd_label')
+        X = df_int.copy()
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_split, random_state=42,shuffle=False)
+        return X_train, X_test, y_train, y_test
+    else:
+        print(f"XGB_Preprocessing: Error - wrong objective specified ({objective}). Should be train, test or inference")
+        return None
 
 def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):
 
