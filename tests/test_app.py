@@ -16,9 +16,6 @@ api_key = "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2"
 pool0_address = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
-price_model_name = "percent_change_1min_forecast_LGBM"
-gasfee_model_name = "gas_fees_1min_forecast_XGBoost"
-
 class TestAppMethods(unittest.TestCase):
     
     def test_etherscan_request(self):
@@ -36,6 +33,9 @@ class TestAppMethods(unittest.TestCase):
         self.assertEqual(actual_columns, valid_columns)
     
     def test_load_model(self):
+
+        price_model_name = "percent_change_1min_forecast_LGBM"
+        gasfee_model_name = "gas_fees_1min_forecast_XGBoost"
         # 
         # Check to make sure we can fetch the models
         #
@@ -50,81 +50,327 @@ class TestAppMethods(unittest.TestCase):
         # Test merging two pools of data for valid columns
         # Note: this assumes the pools are WETH/USDC pair.
         #
-        p0 = etherscan_request('tokentx', api_key, address=pool0_address)
-        p1 = etherscan_request('tokentx', api_key, address=pool1_address)
+        # consolidated_data[tx_hash] = {
+        #        'blockNumber': row['blockNumber'],
+        #        'timeStamp': row['timeStamp'],
+        #        'hash': tx_hash,
+        #        'from': row['from'],
+        #        'to': row['to'],
+        #        'WETH_value': 0,
+        #        'USDC_value': 0,
+        #        'tokenName_WETH': '',
+        #        'tokenName_USDC': '',
+        #        'gas': row['gas'],
+        #        'gasPrice': row['gasPrice'],
+        #        'gasUsed': row['gasUsed'],
+        #        'cumulativeGasUsed': row['cumulativeGasUsed'],
+        #        'confirmations': row['confirmations']
+        #    }
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
 
-        valid_columns = ['time', 'timeStamp', 'p0.weth_to_usd_ratio', 'p0.gas_fees_usd',
+        # Create dummy data
+        data_p0 = {
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            #'hash': np.random.uniform(1900, 2100, size=num_rows),           
+            #'from': np.random.uniform(5, 15, size=num_rows),                
+            #'to': np.random.uniform(1900, 2100, size=num_rows),           
+            'WETH_value': np.random.uniform(0, 10000, size=num_rows),       
+            'USDC_value': np.random.uniform(0, 20000, size=num_rows),       
+            #'tokenName_WETH': np.random.uniform(1900, 2100, size=num_rows),
+            #'tokenName_USDC': np.random.uniform(1900, 2100, size=num_rows),
+            'gas': np.random.uniform(0, 100000, size=num_rows),             
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),        
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),        
+            'cumulativeGasUsed': np.random.uniform(0, 100000, size=num_rows),
+            #'confirmations': np.random.uniform(0, 100000, size=num_rows),   
+
+        }
+        # Create dummy data
+        data_p1 = {
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            #'hash': np.random.uniform(1900, 2100, size=num_rows),           
+            #'from': np.random.uniform(5, 15, size=num_rows),                
+            #'to': np.random.uniform(1900, 2100, size=num_rows),           
+            'WETH_value': np.random.uniform(0, 10000, size=num_rows),       
+            'USDC_value': np.random.uniform(0, 20000, size=num_rows),       
+            #'tokenName_WETH': np.random.uniform(1900, 2100, size=num_rows),
+            #'tokenName_USDC': np.random.uniform(1900, 2100, size=num_rows),
+            'gas': np.random.uniform(0, 100000, size=num_rows),         
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),
+            'cumulativeGasUsed': np.random.uniform(0, 100000, size=num_rows),
+            #'confirmations': np.random.uniform(0, 100000, size=num_rows),   
+        }
+
+        p0 = pd.DataFrame(data_p0)
+        p1 = pd.DataFrame(data_p1)
+
+        valid_output_columns = ['time', 'timeStamp', 'blockNumber', 'p0.weth_to_usd_ratio', 'p0.gas_fees_usd',
        'p1.weth_to_usd_ratio', 'p1.gas_fees_usd', 'percent_change',
        'total_gas_fees_usd']
 
         df_results = merge_pool_data(p0,p1)
         actual_columns = list(df_results.columns)
 
-        self.assertEqual(actual_columns, valid_columns)
+        self.assertEqual(actual_columns, valid_output_columns)
 
-    def test_model_lgbm_preprocessing(self):
+    def test_model_lgbm_preprocessing_inference(self):
         #
         #  Test model preprocessing for LGBM
         #
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
 
-        # fetch data from etherscan.io.
-        p0 = etherscan_request('tokentx', api_key, address=pool0_address)
-        p1 = etherscan_request('tokentx', api_key, address=pool1_address)
-        
-        # merge data from both pools.
-        both_pools = merge_pool_data(p0,p1)
+        # Create dummy data
+        data = {
+            'time': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
+            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
+            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
+            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
+            'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
+            'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
+        }
+
+        # Create the DataFrame
+        merged_pool_data_df = pd.DataFrame(data)
+
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(both_pools)
+        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, forecast_window_min=10, objective='inference', test_split=0.2)
+
+        # Check for 4 return objects.
+        self.assertEqual(len(lgbm_results),1)
+
+    def test_model_lgbm_preprocessing_test(self):
+        #
+        #  Test model preprocessing for LGBM
+        #
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+
+        # Create dummy data
+        data = {
+            'time': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
+            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
+            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
+            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
+            'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
+            'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
+        }
+
+        # Create the DataFrame
+        merged_pool_data_df = pd.DataFrame(data)
+
+
+        # LGBM Preprocessing
+        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, forecast_window_min=10, objective='test', test_split=0.2)
+
+        # Check for 4 return objects.
+        self.assertEqual(len(lgbm_results),2)
+
+
+    def test_model_lgbm_preprocessing_train(self):
+        #
+        #  Test model preprocessing for LGBM
+        #
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+
+        # Create dummy data
+        data = {
+            'time': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
+            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
+            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
+            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
+            'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
+            'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
+        }
+
+        # Create the DataFrame
+        merged_pool_data_df = pd.DataFrame(data)
+
+
+        # LGBM Preprocessing
+        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, forecast_window_min=10, objective='train', test_split=0.2)
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),4)
 
-    def test_model_xgb_preprocessing(self):
+    def test_model_xgb_preprocessing_train(self):
         #
         #  Test model preprocessing for XGBoost Model
         #
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
 
-        # fetch data from etherscan.io.
-        p0 = etherscan_request('tokentx', api_key, address=pool0_address)
-        p1 = etherscan_request('tokentx', api_key, address=pool1_address)
-        
-        # merge data from both pools.
-        both_pools = merge_pool_data(p0,p1)
+        # Create dummy data
+        data = {
+            'time': pd.date_range(start='2025-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(100000, 100000 + num_rows),                            # Sequential block numbers
+            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
+            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
+            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
+            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
+            'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
+            'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
+        }
+
+        # Create the DataFrame
+        merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(both_pools)
+        xgb_results = XGB_preprocessing(merged_pool_data_df, forecast_window_min=10, objective='train', test_split=0.2)
 
-        # Check for 3 return objects.
-        self.assertEqual(len(xgb_results),3)
-    
+        # For training, there are four outputs.
+        self.assertEqual(len(xgb_results),4)
+
+    def test_model_xgb_preprocessing_test(self):
+        #
+        #  Test model preprocessing for XGBoost Model
+        #
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+
+        # Create dummy data
+        data = {
+            'time': pd.date_range(start='2025-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(100000, 100000 + num_rows),                            # Sequential block numbers
+            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
+            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
+            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
+            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
+            'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
+            'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
+        }
+
+        # Create the DataFrame
+        merged_pool_data_df = pd.DataFrame(data)
+
+        # XGB Preprocessing
+        xgb_results = XGB_preprocessing(merged_pool_data_df, forecast_window_min=10, objective='test', test_split=0.2)
+
+        # For training, there are four outputs.
+        self.assertEqual(len(xgb_results),2)
+
+    def test_model_xgb_preprocessing_inference(self):
+        #
+        #  Test model preprocessing for XGBoost Model
+        #
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+
+        # Create dummy data
+        data = {
+            'time': pd.date_range(start='2025-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(100000, 100000 + num_rows),                            # Sequential block numbers
+            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
+            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
+            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
+            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
+            'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
+            'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
+        }
+
+        # Create the DataFrame
+        merged_pool_data_df = pd.DataFrame(data)
+
+        # XGB Preprocessing
+        xgb_results = XGB_preprocessing(merged_pool_data_df, forecast_window_min=10, objective='inference', test_split=0.2)
+
+        # For training, there are four outputs.
+        self.assertEqual(len(xgb_results),1)
+
     def test_model_pricing_inference(self):
         #
         #  Test model preprocessing for XGBoost Model
         #
 
-        # fetch data from etherscan.io.
-        p0 = etherscan_request('tokentx', api_key, address=pool0_address)
-        p1 = etherscan_request('tokentx', api_key, address=pool1_address)
-        
-        # merge data from both pools.
-        both_pools = merge_pool_data(p0,p1)
+        price_model_name = "percent_change_1min_forecast_LGBM"
 
-        # LGBM Preprocessing
-        _, _, X_pct_test, y_pct_test = LGBM_Preprocessing(both_pools)
-        
+        # Columns required for inference: 
+        # percent_change    
+        # rolling_mean_8    
+        # lag_1             
+        # lag_2            
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+
+        # Create dummy data
+        data = {
+            'percent_change': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_8': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_1': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_2': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+        }
+        x_pct_test = pd.DataFrame(data)
+
         model = load_model(price_model_name)
 
+        y_pct_pred = model.predict(x_pct_test)
 
-        y_pct_pred = model.predict(X_pct_test)
-        rmse = root_mean_squared_error(y_pct_test, y_pct_pred)
-        r2 = r2_score(y_pct_test, y_pct_pred)
-        
-        print(f"test_model_pricing_inference: Root Mean Squared Error: {rmse:.4f}")
-        print(f"test_model_pricing_inference: R² Score: {r2:.4f}")
+        self.assertEqual(len(x_pct_test),len(y_pct_pred))
 
-        self.assertEqual(None,None)
-    
+    def test_model_gas_fee_inference(self):
+        #
+        #  Test model preprocessing for XGBoost Model
+        #
+
+        gas_fees_model_name = "gas_fees_1min_forecast_XGBoost"
+
+        # Columns required for inference: 
+        #total_gas_fees_usd    .
+        #lag_1                 .
+        #lag_2                 .
+        #lag_3                 .
+        #lag_4                 .
+        #lag_5                 .
+        #lag_6                 .
+        #lag_7                 .
+        #lag_8                 .
+        #lag_9                 .
+        #rolling_mean_3        .
+        #rolling_mean_6        .          
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+
+        # Create dummy data
+        data = {
+            'total_gas_fees_usd': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_1': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_2': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_3': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_4': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_5': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_6': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_7': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_8': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_9': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_3': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_6': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+
+        }
+        x_pct_test = pd.DataFrame(data)
+
+        model = load_model(gas_fees_model_name)
+
+        y_pct_pred = model.predict(x_pct_test)
+
+        self.assertEqual(len(x_pct_test),len(y_pct_pred))
 
     def test_min_investment_scenario_1(self):
         """
