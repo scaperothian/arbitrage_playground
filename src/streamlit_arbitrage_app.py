@@ -22,6 +22,9 @@ sns.set_style('darkgrid')
 
 import arbutils
 
+# Fetch the API key from environment variables
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+
 # ################################
 # CONFIGURABLE PARAMETERS
 # ################################
@@ -45,8 +48,8 @@ forecast_window_minutes = model_params['FORECAST_WINDOW_MIN']
 
 # fetch data from Etherscan API
 @st.cache_data(ttl=60)
-def etherscan_request(action, api_key, address, startblock=0, endblock=99999999, sort='desc'):
-    results = arbutils.etherscan_request(action, api_key, address, startblock, endblock, sort)
+def etherscan_request(api_key, address, startblock=0, endblock=99999999, sort='desc'):
+    results = arbutils.etherscan_request(api_key, address, startblock, endblock, sort)
     if type(results)!=pd.DataFrame: 
         st.error(results[1])
     else:
@@ -245,12 +248,11 @@ st.set_page_config(page_title="Arbitrage Recommender", page_icon=None, layout="c
 # Sidebar
 #
 st.sidebar.header("API Configuration")
-# TODO: remove... 
-api_key = st.sidebar.text_input("Etherscan API Key", "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2")
 pool0_address = st.sidebar.text_input("Pool 0 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
-pool0_txn_fee = float(st.sidebar.text_input("Pool 0 Transaction Fee (Rate)",0.003))
+pool0_txn_fee = float(st.sidebar.selectbox(label="Pool 0 Transaction Fee (${T_0}$)",options=[0.01, 0.003,0.0005,0.0001],index=1)) #select 0.003 by default.
 pool1_address = st.sidebar.text_input("Pool 1 Address", "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640")
-pool1_txn_fee = float(st.sidebar.text_input("Pool 1 Transaction Fee (Rate)",0.0005))
+pool1_txn_fee = float(st.sidebar.selectbox(label="Pool 1 Transaction Fee (${T_0}$)",options=[0.01, 0.003,0.0005,0.0001],index=2)) #select 0.0005 by default.
+
 st.sidebar.markdown(
     '[Back to Main Page (mydiamondhands)](https://mydiamondhands.io/)',
     unsafe_allow_html=True
@@ -270,8 +272,8 @@ st.write(f'Selected Budget: {threshold}')
 if st.button("Run Analysis"):
     with st.spinner("Fetching and processing data..."):
         # Fetch and process data for both pools
-        p0 = etherscan_request('tokentx', api_key, address=pool0_address)
-        p1 = etherscan_request('tokentx', api_key, address=pool1_address)
+        p0 = etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
+        p1 = etherscan_request(ETHERSCAN_API_KEY, address=pool1_address)
         
         if p0 is None or p1 is None:
             st.error("Failed to fetch data from Etherscan. Please check your API key and try again.")
