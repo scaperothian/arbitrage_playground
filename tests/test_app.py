@@ -273,7 +273,7 @@ class TestAppMethods(unittest.TestCase):
         }
 
         # Define the number of rows for the dummy DataFrame
-        num_rows = 10
+        num_rows = 20
 
         # Create dummy data
         data = {
@@ -529,7 +529,7 @@ class TestAppMethods(unittest.TestCase):
         POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
         
         # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
-        print(f"T1 > T0, and percent_change ({0.321}) is greater than {(1-0.1)/(1-0.3)-1}")
+        #print(f"T1 > T0, and percent_change ({0.321}) is greater than {(1-0.1)/(1-0.3)-1}")
         test_dict = {
             GAS_FEES_COL_NAME:[20],
             PERCENT_CHANGE_COL_NAME:[0.321],
@@ -573,7 +573,7 @@ class TestAppMethods(unittest.TestCase):
         POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
         
         # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
-        print(f"T1 > T0, and percent_change ({0.0321}) is less than {(1-0.1)/(1-0.3)-1}")
+        #print(f"T1 > T0, and percent_change ({0.0321}) is less than {(1-0.1)/(1-0.3)-1}")
         test_dict = {
             GAS_FEES_COL_NAME:[20],
             PERCENT_CHANGE_COL_NAME:[0.0321],
@@ -615,7 +615,7 @@ class TestAppMethods(unittest.TestCase):
         POOL1_TXN_FEE_COL_NAME = 'pool1_txn_fee'
         
         # positive percent_change, T0 is for Pool 1, T1 is for Pool 0
-        print(f"T1 > T0, and percent_change ({0.0321}) is equal to {(1-0.1)/(1-0.3)-1}")
+        #print(f"T1 > T0, and percent_change ({0.0321}) is equal to {(1-0.1)/(1-0.3)-1}")
         test_dict = {
             GAS_FEES_COL_NAME:[20],
             PERCENT_CHANGE_COL_NAME:[(1-0.1)/(1-0.3)-1],
