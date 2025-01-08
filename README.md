@@ -13,13 +13,18 @@
    python -m unittest tests.test_app   
    ```
 
-3. Run the basic streamlit app for exploring arbitrage basics
+3. Run training code to update models
+   ```
+   $ python src/train.py
+   ```
+
+4. Run the basic streamlit app for exploring arbitrage basics
 
    ```
    $ streamlit run src/streamlit_arbitrage_playground.py
    ```
 
-4. Run a streamlit app to provide a 1 minute forecast on arbitrage opportunities, and some analysis of the last 12 hours of transactions.
+5. Run a streamlit app to provide a 1 minute forecast on arbitrage opportunities, and some analysis of the last 12 hours of transactions.
    ```
    $ streamlit run src/streamlit_arbitrage_app.py
    ```

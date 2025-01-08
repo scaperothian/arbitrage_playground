@@ -121,6 +121,21 @@ class TestAppMethods(unittest.TestCase):
         #
         #  Test model preprocessing for LGBM
         #
+
+        # ################################
+        # CONFIGURABLE MODEL PARAMETERS
+        # ################################
+        model_params = {
+            'FORECAST_WINDOW_MIN':1,
+            'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+            'MODEL_PATH':"../models/",
+            # PCT_CHANGE model parameters (things that can be ablated using the same data)
+            "PCT_CHANGE_MODEL_NAME":"LGBM",
+            "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
+            "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+            "PCT_CHANGE_TEST_SPLIT":0.2,
+        }
+
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
@@ -142,7 +157,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, forecast_window_min=10, objective='inference', test_split=0.2)
+        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, model_params, objective='inference')
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),1)
@@ -151,6 +166,22 @@ class TestAppMethods(unittest.TestCase):
         #
         #  Test model preprocessing for LGBM
         #
+
+        # ################################
+        # CONFIGURABLE MODEL PARAMETERS
+        # ################################
+        model_params = {
+            'FORECAST_WINDOW_MIN':1,
+            'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+            'MODEL_PATH':"../models/",
+            # PCT_CHANGE model parameters (things that can be ablated using the same data)
+            "PCT_CHANGE_MODEL_NAME":"LGBM",
+            "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
+            "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+            "PCT_CHANGE_TEST_SPLIT":0.2,
+        }
+
+
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
@@ -172,7 +203,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, forecast_window_min=10, objective='test', test_split=0.2)
+        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, model_params, objective='test')
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),2)
@@ -182,6 +213,21 @@ class TestAppMethods(unittest.TestCase):
         #
         #  Test model preprocessing for LGBM
         #
+
+        # ################################
+        # CONFIGURABLE MODEL PARAMETERS
+        # ################################
+        model_params = {
+            'FORECAST_WINDOW_MIN':1,
+            'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+            'MODEL_PATH':"../models/",
+            # PCT_CHANGE model parameters (things that can be ablated using the same data)
+            "PCT_CHANGE_MODEL_NAME":"LGBM",
+            "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
+            "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+            "PCT_CHANGE_TEST_SPLIT":0.2,
+        }
+
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
@@ -203,7 +249,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, forecast_window_min=10, objective='train', test_split=0.2)
+        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, model_params, objective='train')
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),4)
@@ -212,6 +258,20 @@ class TestAppMethods(unittest.TestCase):
         #
         #  Test model preprocessing for XGBoost Model
         #
+        # ################################
+        # CONFIGURABLE PARAMETERS
+        # ################################
+        model_params = {
+            'FORECAST_WINDOW_MIN':1,
+            'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+            'MODEL_PATH':"../models/",
+            # GAS_FEES model parameters (things that can be ablated using the same data)
+            "GAS_FEES_MODEL_NAME":"XGBoost",
+            "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
+            "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+            "GAS_FEES_TEST_SPLIT":0.2
+        }
+
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
@@ -232,7 +292,7 @@ class TestAppMethods(unittest.TestCase):
         merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(merged_pool_data_df, forecast_window_min=10, objective='train', test_split=0.2)
+        xgb_results = XGB_preprocessing(merged_pool_data_df, model_params, objective='train')
 
         # For training, there are four outputs.
         self.assertEqual(len(xgb_results),4)
@@ -241,6 +301,20 @@ class TestAppMethods(unittest.TestCase):
         #
         #  Test model preprocessing for XGBoost Model
         #
+        # ################################
+        # CONFIGURABLE PARAMETERS
+        # ################################
+        model_params = {
+            'FORECAST_WINDOW_MIN':1,
+            'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+            'MODEL_PATH':"../models/",
+            # GAS_FEES model parameters (things that can be ablated using the same data)
+            "GAS_FEES_MODEL_NAME":"XGBoost",
+            "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
+            "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+            "GAS_FEES_TEST_SPLIT":0.2
+        }
+
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
@@ -261,7 +335,7 @@ class TestAppMethods(unittest.TestCase):
         merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(merged_pool_data_df, forecast_window_min=10, objective='test', test_split=0.2)
+        xgb_results = XGB_preprocessing(merged_pool_data_df, model_params, objective='test')
 
         # For training, there are four outputs.
         self.assertEqual(len(xgb_results),2)
@@ -270,6 +344,20 @@ class TestAppMethods(unittest.TestCase):
         #
         #  Test model preprocessing for XGBoost Model
         #
+        # ################################
+        # CONFIGURABLE PARAMETERS
+        # ################################
+        model_params = {
+            'FORECAST_WINDOW_MIN':1,
+            'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+            'MODEL_PATH':"../models/",
+            # GAS_FEES model parameters (things that can be ablated using the same data)
+            "GAS_FEES_MODEL_NAME":"XGBoost",
+            "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
+            "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+            "GAS_FEES_TEST_SPLIT":0.2
+        }
+
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
@@ -290,7 +378,7 @@ class TestAppMethods(unittest.TestCase):
         merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(merged_pool_data_df, forecast_window_min=10, objective='inference', test_split=0.2)
+        xgb_results = XGB_preprocessing(merged_pool_data_df, model_params, objective='inference')
 
         # For training, there are four outputs.
         self.assertEqual(len(xgb_results),1)

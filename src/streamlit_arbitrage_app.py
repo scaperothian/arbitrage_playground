@@ -25,7 +25,7 @@ import arbutils
 # ################################
 # CONFIGURABLE PARAMETERS
 # ################################
-params = {
+model_params = {
     'FORECAST_WINDOW_MIN':1,
     'TRAINING_DATA_PATH':"../../arbitrage_3M/",
     'MODEL_PATH':"../models/",
@@ -41,7 +41,7 @@ params = {
     "GAS_FEES_TEST_SPLIT":0.2
 }
 
-forecast_window_minutes = params['FORECAST_WINDOW_MIN']
+forecast_window_minutes = model_params['FORECAST_WINDOW_MIN']
 
 # fetch data from Etherscan API
 @st.cache_data(ttl=60)
@@ -54,13 +54,13 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
 
 # 
 @st.cache_data
-def percent_change_preprocessing(both_pools, forecast_window_min, objective='test', test_split=0.0):
-    return arbutils.LGBM_Preprocessing(both_pools, forecast_window_min=forecast_window_min, objective=objective, test_split=test_split)
+def percent_change_preprocessing(both_pools, model_parameters, objective='test'):
+    return arbutils.LGBM_Preprocessing(both_pools, params=model_parameters, objective=objective)
 
 # 
 @st.cache_data
-def gas_fee_preprocessing(both_pools, forecast_window_min, objective='test', test_split=0.0):
-    return arbutils.XGB_preprocessing(both_pools, forecast_window_min=forecast_window_min, objective=objective, test_split=test_split)
+def gas_fee_preprocessing(both_pools, model_parameters, objective='test'):
+    return arbutils.XGB_preprocessing(both_pools, params=model_parameters, objective=objective)
 
 @st.cache_data
 def merge_pool_data(p0,p1):
@@ -129,14 +129,14 @@ def calculate_profit(y_pct_test, y_pct_pred, y_gas_test, y_gas_pred, pool0_txn_f
     
     return df
 
-def create_min_investment_breakout(last_sample, pred_sample,pool0_txn_fee, pool1_txn_fee):
+def create_min_investment_breakout(last_sample, pred_sample, model_forecast_window_min, pool0_txn_fee, pool1_txn_fee):
     """
     last_sample (DataSeries): 
     pred_sample (DataSeries)
     """
     T_lt = f"{last_sample['time']}"
     block_num = f"{last_sample['blockNumber']}"
-    block_num_pred = f"{int(last_sample['blockNumber']) + 5 * FORECAST_WINDOW_MIN}" # blocks created every 12s 
+    block_num_pred = f"{int(last_sample['blockNumber']) + 5 * model_forecast_window_min}" # blocks created every 12s 
     T_pred = f"{pred_sample['time']+timedelta(minutes=1)}"
     A = f"{1/last_sample['p0.weth_to_usd_ratio']:.2f}"    # Pool 0 ETH / USDC
     B = f"{pool0_txn_fee:.5f}"                               # Pool 0 Transaction Fee
@@ -280,14 +280,14 @@ if st.button("Run Analysis"):
         both_pools = merge_pool_data(p0, p1)
 
         # percent_change Preprocessing for model prediction
-        X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, params, objective='test')
+        X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, model_params, objective='test')
         
         if X_pct_test is None or y_pct_test is None:
             st.error("Preprocessing for percent_change data failed. Cannot proceed with analysis.")
             raise Exception
 
         # gas_fee Preprocessing for model prediction
-        X_gas_test, y_gas_test = gas_fee_preprocessing(both_pools, params, objective='test')
+        X_gas_test, y_gas_test = gas_fee_preprocessing(both_pools, model_params, objective='test')
 
         if X_gas_test is None or y_gas_test is None:
             st.error("Preprocessing for gas fees data failed. Cannot proceed with analysis.")
@@ -362,8 +362,8 @@ if st.button("Run Analysis"):
         st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
 
         # Predictions on future transactions!
-        X_pct_change_infer = percent_change_preprocessing(both_pools, forecast_window_minutes, objective='inference')
-        X_gas_fee_infer = gas_fee_preprocessing(both_pools, forecast_window_minutes, objective='inference')
+        X_pct_change_infer = percent_change_preprocessing(both_pools, model_params, objective='inference')
+        X_gas_fee_infer = gas_fee_preprocessing(both_pools, model_params, objective='inference')
 
         y_pct_change_pred_latest = pct_change_model.predict(X_pct_change_infer, num_iteration=pct_change_model.best_iteration)
         y_gas_fee_pred_latest = gas_fee_model.predict(X_gas_fee_infer)
@@ -591,7 +591,7 @@ if st.button("Run Analysis"):
         last_sample_ds = both_pools.iloc[-1]
         last_sample_ds_pred = df_min.iloc[-1]
 
-        table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, pool0_txn_fee, pool1_txn_fee)
+        table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, forecast_window_minutes,pool0_txn_fee, pool1_txn_fee)
 
         st.table(table_df)
 

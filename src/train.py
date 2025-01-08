@@ -3,6 +3,7 @@ import os
 import numpy as np
 import seaborn as sns
 import pickle
+import logging
 
 # To train the price prediction model...
 import lightgbm as lgb
@@ -10,6 +11,7 @@ import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 
+import arbutils
 
 def import_data(location):
     """
@@ -49,117 +51,6 @@ def import_data(location):
         return final_df.drop('Unnamed: 0',axis=1).reset_index(drop=True)
     except:
         return final_df.reset_index(drop=True)
-
-def find_closest_timestamp(df, time_col, label_key, minutes):
-    # Ensure 'time' column is in datetime format
-    df.loc[:, time_col] = pd.to_datetime(df[time_col])
-
-    # Create a shifted version of the DataFrame with the target times
-    shifted_df = df.copy()
-    shifted_df[time_col] = shifted_df[time_col] - pd.Timedelta(minutes=minutes)
-
-    # Merge the original DataFrame with the shifted DataFrame on the closest timestamps
-    result_df = pd.merge_asof(df.sort_values(by=time_col),
-                              shifted_df.sort_values(by=time_col),
-                              on=time_col,
-                              direction='forward',
-                              suffixes=('', '_label'))
-
-    # Select the required columns and rename them
-    result_df = result_df[[time_col,label_key,label_key+'_label']]
-
-    return result_df
-
-def create_gas_fees_splits(df_input, params):
-    """
-    Input: Dataframe with time and gas fees values.
-
-    Creating splits using configurable model parameters.
-    
-    Returns: X_train, X_test, y_train, y_test
-    """
-    FORECAST_WINDOW_MIN = params['FORECAST_WINDOW_MIN']
-    N_WINDOW_AVERAGE = params['GAS_FEES_N_WINDOW_AVERAGE']
-    NUM_LAGS = params['GAS_FEES_NUM_LAGS']
-
-    int_df = df_input[['time','total_gas_fees_usd']]
-    int_df = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', FORECAST_WINDOW_MIN)
-    
-    for i in range(1, NUM_LAGS + 1):
-        int_df[f'lag_{i}'] = int_df['total_gas_fees_usd'].shift(i)
-    
-    int_df[f'rolling_mean_{N_WINDOW_AVERAGE}'] = int_df['total_gas_fees_usd'].rolling(window=N_WINDOW_AVERAGE).mean()
-    int_df[f'rolling_mean_{N_WINDOW_AVERAGE*2}'] = int_df['total_gas_fees_usd'].rolling(window=N_WINDOW_AVERAGE*2).mean()
-    int_df.dropna(inplace=True)
-
-    # prune excess rows from lagging operation
-    #max_prune = max(N_WINDOW_AVERAGE*2,NUM_LAGS)
-    #int_df = int_df.iloc[max_prune:]
-
-    
-    has_nans = int_df.isna().any().any()
-    print("Are there any NaNs in the DataFrame?", has_nans)
-    if has_nans: 
-        print(f"Found: {int_df.isna().sum()}")
-    
-    # Create time index foer the dataframe.
-    int_df.index = int_df.pop('time')
-    int_df.index = pd.to_datetime(int_df.index)
-    
-    # Create labels and training...
-    y = int_df.pop('total_gas_fees_usd_label')
-    X = int_df.copy()
-
-    print(int_df.columns)
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42,shuffle=False)
-    return X_train, X_test, y_train, y_test
-
-
-def create_pct_change_splits(df_input, params):
-    """
-    Input: Dataframe with time and percent_change values.
-
-    Creating splits using configurable model parameters.
-    
-    Returns: X_train, X_test, y_train, y_test
-    """
-
-    FORECAST_WINDOW_MIN = params['FORECAST_WINDOW_MIN']
-    N_WINDOW_AVERAGE = params['PCT_CHANGE_N_WINDOW_AVERAGE']
-    NUM_LAGS = params['PCT_CHANGE_NUM_LAGS']
-    
-    int_df = df_input[['time','percent_change']]
-    int_df = find_closest_timestamp(int_df, 'time', 'percent_change', FORECAST_WINDOW_MIN)
-    
-    for i in range(1, NUM_LAGS + 1):
-        int_df[f'lag_{i}'] = int_df['percent_change'].shift(i)
-    
-    int_df[f'rolling_mean_{N_WINDOW_AVERAGE}'] = int_df['percent_change'].rolling(window=N_WINDOW_AVERAGE).mean()
-    int_df.dropna(inplace=True)
-
-    # prune excess rows from lagging operation
-    #max_prune = max(N_WINDOW_AVERAGE,NUM_LAGS)
-    #int_df = int_df.iloc[max_prune:]
-
-    
-    has_nans = int_df.isna().any().any()
-    print("Are there any NaNs in the DataFrame?", has_nans)
-    if has_nans: 
-        print(f"Found: {int_df.isna().sum()}")
-    
-    # Create time index foer the dataframe.
-    int_df.index = int_df.pop('time')
-    int_df.index = pd.to_datetime(int_df.index)
-    
-    # Create labels and training...
-    y = int_df.pop('percent_change_label')
-    X = int_df.copy()
-
-    print(int_df.columns)
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42,shuffle=False)
-    return X_train, X_test, y_train, y_test
 
 def xgboost_gas_fees_train(X_train, X_test, y_train, y_test):
     """
@@ -232,6 +123,20 @@ def lgbm_pct_change_train(X_train, X_test, y_train, y_test):
     #return model and metrics
     return gbm, metrics
 
+def configure_logs(log_file_name):
+    # Configure logging
+    # Remove all existing handlers (to reconfigure dynamically)
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    # Configure logging
+    logging.basicConfig(
+        filename=log_file_name,        # Log file name
+        filemode='w',               # Append mode ('w' for overwrite, 'a' for append)
+        format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
+        level=logging.INFO          # Log level (INFO, DEBUG, WARNING, etc.)
+    )
+
 if __name__ == "__main__":
 
     # ################################
@@ -239,16 +144,18 @@ if __name__ == "__main__":
     # ################################
     params = {
         'FORECAST_WINDOW_MIN':1,
-        'TRAINING_DATA_PATH':"../../arbitrage_3M/",
-        'MODEL_PATH':"../models/",
+        'TRAINING_DATA_PATH':"../arbitrage_3M/",
+        'MODEL_PATH':"models/",
         # PCT_CHANGE model parameters (things that can be ablated using the same data)
         "PCT_CHANGE_MODEL_NAME":"LGBM",
         "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
-        "PCT_CHANGE_N_WINDOW_AVERAGE":8, # rollling mean value
+        "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+        "PCT_CHANGE_TEST_SPLIT":0.2,
         # GAS_FEES model parameters (things that can be ablated using the same data)
         "GAS_FEES_MODEL_NAME":"XGBoost",
         "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
-        "GAS_FEES_N_WINDOW_AVERAGE":3 # rollling mean value
+        "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+        "GAS_FEES_TEST_SPLIT":0.2
     }
 
     MODEL_PATH = params['MODEL_PATH']
@@ -267,25 +174,32 @@ if __name__ == "__main__":
     # ################################
     # TRAINING PERCENT CHANGE MODEL
     # ################################   
+    model_filename = f'{MODEL_PATH}percent_change_{FORECAST_WINDOW_MIN}min_forecast_{PCT_CHANGE_MODEL_NAME}.pkl'
+    configure_logs(f'{model_filename}.perf')
+    logging.info(f"{params}")
+
     # Training for Percent Change in Price.
-    X_train, X_test, y_train, y_test = create_pct_change_splits(df,params)
+    X_train, X_test, y_train, y_test = arbutils.LGBM_Preprocessing(df,params,objective='train')
     model, metrics = lgbm_pct_change_train(X_train, X_test, y_train, y_test)
-    print("Percent Change in Price RMSE:", metrics['RMSE'])
-    print("Percent Change in Price R Squared:", metrics['R Squared'])
+    logging.info(f"Percent Change in Price RMSE:{metrics['RMSE']}")
+    logging.info(f"Percent Change in Price R Squared:{metrics['R Squared']}")
 
     # Use this instead of gbm.save_model bc we are using pickle to load the model in our analysis.
-    with open(f'{MODEL_PATH}percent_change_{FORECAST_WINDOW_MIN}min_forecast_{PCT_CHANGE_MODEL_NAME}.pkl', 'wb') as f:
+    with open(model_filename, 'wb') as f:
         pickle.dump(model, f)
 
     # ################################
     # TRAINING GAS FEES MODEL
     # ################################ 
+    model_filename = f'{MODEL_PATH}gas_fees_{FORECAST_WINDOW_MIN}min_forecast_{GAS_FEES_MODEL_NAME}.pkl'
+    configure_logs(f'{model_filename}.perf')
+    logging.info(f"{params}")
     # Training for Percent Change in Price.
-    X_train, X_test, y_train, y_test = create_gas_fees_splits(df,params)
+    X_train, X_test, y_train, y_test = arbutils.XGB_preprocessing(df,params,objective='train')
     model, metrics = xgboost_gas_fees_train(X_train, X_test, y_train, y_test)
-    print("Gas Fees RMSE:", metrics['RMSE'])
-    print("Gas Fees R Squared:", metrics['R Squared'])
+    logging.info(f"Gas Fees RMSE:{metrics['RMSE']}")
+    logging.info(f"Gas Fees R Squared:{metrics['R Squared']}")
     
     # Use this instead of gbm.save_model bc we are using pickle to load the model in our analysis.
-    with open(f'{MODEL_PATH}gas_fees_{FORECAST_WINDOW_MIN}min_forecast_{GAS_FEES_MODEL_NAME}.pkl', 'wb') as f:
+    with open(model_filename, 'wb') as f:
         pickle.dump(model, f)
