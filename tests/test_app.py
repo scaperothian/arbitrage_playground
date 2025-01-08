@@ -11,8 +11,7 @@ import warnings
 warnings.filterwarnings("ignore", message="Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.")
 
 
-# API inputs: TODO - put these in a config file...
-api_key = "16FCD3FTVWC3KDK17WS5PTWRQX1E2WEYV2"
+# API inputs
 pool0_address = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
@@ -23,7 +22,9 @@ class TestAppMethods(unittest.TestCase):
         # Fetch the data and check the columns....
         # Note: this method assumes the pools are WETH/USDC pair.
         #
-        df_results = etherscan_request('tokentx', api_key, address=pool0_address)
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+
+        df_results = etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
         valid_columns = ['blockNumber', 'timeStamp', 'hash', 'from', 'to', 'WETH_value',
        'USDC_value', 'tokenName_WETH', 'tokenName_USDC', 'gas', 'gasPrice',
        'gasUsed', 'cumulativeGasUsed', 'confirmations']
