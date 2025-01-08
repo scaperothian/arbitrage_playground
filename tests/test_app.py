@@ -1,15 +1,19 @@
 import math
+import os
 import unittest
 import pandas as pd
 import numpy as np
 
-from src.arbutils import load_model, etherscan_request, merge_pool_data, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
+from src.arbutils import load_model, etherscan_request, alchemy_request, merge_pool_data, merge_pool_data_v2, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
 
 from sklearn.metrics import root_mean_squared_error, r2_score
 
 import warnings
 warnings.filterwarnings("ignore", message="Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.")
 
+# Add environmental variable ALCHEMY_API_KEY
+ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
+ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
 
 # API inputs
 pool0_address = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
@@ -17,6 +21,18 @@ pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
 class TestAppMethods(unittest.TestCase):
     
+    def test_alchemy_request(self):
+        
+        df_results = alchemy_request(ALCHEMY_URL, pool_address=pool0_address, blocks_to_look_back=40, latest_block=21582391)
+        valid_columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
+                    'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
+                    'block_number', 'gas_price', 'gas_used', 'sender', 'recipient']
+
+
+        actual_columns = list(df_results.columns)
+        
+        self.assertEqual(actual_columns, valid_columns)
+
     def test_etherscan_request(self):
         #
         # Fetch the data and check the columns....
@@ -118,6 +134,74 @@ class TestAppMethods(unittest.TestCase):
 
         self.assertEqual(actual_columns, valid_output_columns)
 
+    def test_merge_pool_data_v2(self):
+        """
+                valid_input_columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
+                    'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
+                    'block_number', 'gas_price', 'gas_used', 'sender', 'recipient']
+        """
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+        pool0_tx_fee = 0.01
+        pool1_tx_fee = 0.01
+
+        # Create dummy data
+        data_p0 = {
+            'transaction_hash': ["0x45"]*num_rows,                    
+            'timestamp': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'sqrtPriceX96': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'tick': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'eth_price_usd': np.random.uniform(0, 10000, size=num_rows),       
+            'usdc_amount0': np.random.uniform(0, 20000, size=num_rows),       
+            'eth_amount1': np.random.uniform(0, 20000, size=num_rows),       
+            'liquidity': np.random.uniform(0, 20000, size=num_rows),       
+            'block_number': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'gas_price': np.random.uniform(0, 100000, size=num_rows),        
+            'gas_used': np.random.uniform(0, 100000, size=num_rows),        
+            'sender': ["0x35"]*num_rows,   
+            'recipient': ["0x35"]*num_rows,   
+        }
+
+        # Create dummy data
+        data_p1 = {
+            'transaction_hash': ["0x45"]*num_rows,                    
+            'timestamp': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'sqrtPriceX96': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'tick': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'eth_price_usd': np.random.uniform(0, 10000, size=num_rows),       
+            'usdc_amount0': np.random.uniform(0, 20000, size=num_rows),       
+            'eth_amount1': np.random.uniform(0, 20000, size=num_rows),       
+            'liquidity': np.random.uniform(0, 20000, size=num_rows),       
+            'block_number': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'gas_price': np.random.uniform(0, 100000, size=num_rows),        
+            'gas_used': np.random.uniform(0, 100000, size=num_rows),        
+            'sender': ["0x35"]*num_rows,   
+            'recipient': ["0x35"]*num_rows,   
+        }
+
+        p0 = pd.DataFrame(data_p0)
+        p1 = pd.DataFrame(data_p1)
+
+        valid_output_columns = ['time', 'timestamp', 'p1.transaction_time', 'p1.transaction_epoch_time',
+                'p1.t0_amount', 'p1.t1_amount', 'p1.t0_token', 'p1.t1_token', 'p1.tick',
+                'p1.sqrtPriceX96', 'p1.gasUsed', 'p1.gasPrice', 'p1.blockNumber',
+                'p1.sender', 'p1.recipient', 'p1.transaction_id', 'p1.transaction_type',
+                'p1.transaction_rate', 'p1.eth_price_usd', 'p1.transaction_fees_usd',
+                'p1.gas_fees_usd', 'p1.total_fees_usd', 'p0.transaction_time',
+                'p0.transaction_epoch_time', 'p0.t0_amount', 'p0.t1_amount',
+                'p0.t0_token', 'p0.t1_token', 'p0.tick', 'p0.sqrtPriceX96',
+                'p0.gasUsed', 'p0.gasPrice', 'p0.blockNumber', 'p0.sender',
+                'p0.recipient', 'p0.transaction_id', 'p0.transaction_type',
+                'p0.transaction_rate', 'p0.eth_price_usd', 'p0.transaction_fees_usd',
+                'p0.gas_fees_usd', 'p0.total_fees_usd', 'percent_change',
+                'total_gas_fees_usd', 'total_transaction_rate',
+                'total_transaction_fees_used', 'total_fees_usd', 'swap_go_nogo']
+
+        df_results = merge_pool_data_v2(p0,pool0_tx_fee,p1,pool1_tx_fee)
+        actual_columns = list(df_results.columns)
+
+        self.assertEqual(actual_columns, valid_output_columns)
+
     def test_model_lgbm_preprocessing_inference(self):
         #
         #  Test model preprocessing for LGBM
@@ -143,12 +227,6 @@ class TestAppMethods(unittest.TestCase):
         # Create dummy data
         data = {
             'time': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
-            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
-            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
-            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
-            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
             'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
             'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
         }
@@ -189,12 +267,6 @@ class TestAppMethods(unittest.TestCase):
         # Create dummy data
         data = {
             'time': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
-            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
-            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
-            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
-            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
             'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
             'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
         }
@@ -235,12 +307,6 @@ class TestAppMethods(unittest.TestCase):
         # Create dummy data
         data = {
             'time': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
-            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
-            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
-            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
-            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
             'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
             'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
         }
@@ -322,12 +388,6 @@ class TestAppMethods(unittest.TestCase):
         # Create dummy data
         data = {
             'time': pd.date_range(start='2025-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
-            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(100000, 100000 + num_rows),                            # Sequential block numbers
-            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
-            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
-            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
-            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
             'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
             'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
         }
@@ -365,12 +425,6 @@ class TestAppMethods(unittest.TestCase):
         # Create dummy data
         data = {
             'time': pd.date_range(start='2025-01-01 00:00:00', periods=num_rows, freq='ME'),  # Generate hourly timestamps
-            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(100000, 100000 + num_rows),                            # Sequential block numbers
-            'p0.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios
-            'p0.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p0
-            'p1.weth_to_usd_ratio': np.random.uniform(1900, 2100, size=num_rows),           # Random WETH to USD ratios for p1
-            'p1.gas_fees_usd': np.random.uniform(5, 15, size=num_rows),                     # Random gas fees in USD for p1
             'percent_change': np.random.uniform(-0.1, 0.1, size=num_rows),                  # Random percent changes between -10% and +10%
             'total_gas_fees_usd': np.random.uniform(10, 30, size=num_rows),                 # Random total gas fees
         }

@@ -6,8 +6,51 @@ import requests
 import pandas as pd
 from datetime import datetime
 
+import src.alchemyutils as alchemyutils
+
 from sklearn.model_selection import train_test_split
 
+def alchemy_request(url, pool_address, blocks_to_look_back=40, latest_block=0):
+   
+    #
+    # Look for Swap Events in the duration from "latest block" to "latest block - blocks_to_look_back"
+    #
+    # pool_df.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
+    #   'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
+    #   'block_number']
+    pool_df, npool_txs, _ = alchemyutils.fetch_swap_pool(url, 
+                                            pool_address, 
+                                            blocks_to_look_back, 
+                                            latest_block)
+    
+    print("")
+    if npool_txs == 0:
+        print("Pool: Did not find any transactions in the window specified.")
+        return None
+        
+    else:
+        print(f"Latest Block Timestamp: {pool_df['timestamp'].max()-pd.Timedelta(hours=4)}")
+        pool_total_minutes = (pool_df['timestamp'].max()-pool_df['timestamp'].min()).total_seconds() / 60
+        print(f"Duration of Pool Data (in minutes): {pool_total_minutes} minutes")
+
+    #
+    # Get detailed block data from block numbers...
+    #
+    # pool_block_details.columns = ['timestamp', 'transaction_hash', 'block_number', 'gas_price',
+    #   'gas_used', 'sender', 'recipient']
+    pool_block_details = alchemyutils.fetch_block_details(pool_df)
+
+    # merge 
+    pool_final = pool_df.merge(pool_block_details,
+                                 how='left',
+                                 on=['transaction_hash','timestamp','block_number']).drop_duplicates()
+    if (pool_final['gas_price'].isna().sum())==0 and (pool_df.shape[0]==pool_final.shape[0]):
+        print("All transactions merged Successfully")
+    else:
+        print("Issue with creating final dataframe with gas prices.")
+        return None
+
+    return pool_final
 
 def etherscan_request(api_key, address, startblock=0, endblock=99999999, sort='desc'):
 
@@ -209,7 +252,11 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
 
 def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     """
-    compatible with alchemy_request(...)
+    
+    Inputs: 
+    p0.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
+                    'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
+                    'block_number', 'gas_price', 'gas_used', 'sender', 'recipient']
     
     Return: 
     both_pools.columns = ['time', 'timestamp', 'p1.transaction_time', 'p1.transaction_epoch_time',
