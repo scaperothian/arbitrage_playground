@@ -9,7 +9,7 @@ from datetime import datetime
 from sklearn.model_selection import train_test_split
 
 
-def etherscan_request(action, api_key, address, startblock=0, endblock=99999999, sort='desc'):
+def etherscan_request(api_key, address, startblock=0, endblock=99999999, sort='desc'):
 
     """
     fetch transactions from address
@@ -20,7 +20,7 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
     base_url = 'https://api.etherscan.io/api'
     params = {
         'module': 'account',
-        'action': action,
+        'action': 'tokentx',
         'address': address,
         'startblock': startblock,
         'endblock': endblock,
@@ -100,7 +100,205 @@ def etherscan_request(action, api_key, address, startblock=0, endblock=99999999,
 
     return pd.DataFrame.from_dict(consolidated_data, orient='index')
 
+def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
+    """
+    used with merge_pool_data_v2 (only)
+
+    TODO: combine this with merge_pool_data_v2 somehow.
+    
+    TODO: right now, this only works with WETH / USDC.  
+    - Implement t#_res to work with other pools.
+    - rename the _usd calculated values to work relative to a token 
+    
+    Create dataframe from extracted query data for a single pool.
+    pool_id (string) - hash for uniswap swap pool
+    transaction_rate (float) - found on uniswap.com for the specific pool.  
+               Can be four different values in uniswap v3: 1%, 0.3%, 0.05%, 0.01%
+    t0_res - token 0 resolution - see ethereum contract to understand what the res of the token is.
+    t1_res - token 1 resolution 
+    num (int) - what number to call the pool informally (Default: Pool 0)
+
+    Columns: 
+    Swaps Pool (raw data)
+        p#.transaction_time (string) - used to preserve the original timestamp 
+        p#.transaciton_epoch_time (long) - used to preserve the original timestamp
+        p#.t0_amount (float)
+        p#.t1_amount (float)
+        p#.t0_token (string)
+        p#.t1_token (string)
+        p#.tick (long)
+        p#.sqrtPriceX96 (long)
+        p#.gasUsed (long)
+        p#.gasPrice (long)
+        p#.blockNumber (long)
+        p#.sender (string)
+        p#.recipient (string)
+        p#.transaction_id (string)
+    
+    Swaps Pool (calculated)
+        p#.transaction_type (int) - 0 is SWAP, 1 is BURN, 2 is MINT
+        p#.transaction_rate (float)
+        p#.eth_price_usd - conversion from sqrtPriceX96.
+        p#.transaction_fee_usd (float) - |p0.transaction_rate * p0.t1_amount|*eth_price_usd
+        p#.gas_fees_usd - total gas fees for Pool 0 calculated from gasUsed*gasPrice.
+        p#.total_fees_usd - sum of p0.gas_fees_usd and p0.transaction_fee_usd.
+    """
+    # Extract Raw Pool data from CSV files.
+    # Local files are expected in the same directory as this notebook.
+    #pool_swap_df = extract_swap_df(pool_id,'./pools/.')
+    
+    # Reorders things in time series
+    pool_swap_df = pool_swap_df.sort_values(by='timestamp')
+    
+    # Creating columns directly from extracted data...
+    pool_swap_df[f'p{num}.transaction_time'] = pool_swap_df['time']
+    pool_swap_df[f'p{num}.transaction_epoch_time'] = pool_swap_df['timestamp']
+    pool_swap_df[f'p{num}.t0_amount'] = pool_swap_df['amount0']
+    pool_swap_df[f'p{num}.t1_amount'] = pool_swap_df['amount1']
+    pool_swap_df[f'p{num}.t0_token'] = pool_swap_df['pool.token0.name']
+    pool_swap_df[f'p{num}.t1_token'] = pool_swap_df['pool.token1.name']
+    pool_swap_df[f'p{num}.tick'] = pool_swap_df['tick']
+    pool_swap_df[f'p{num}.sqrtPriceX96'] = pool_swap_df['sqrtPriceX96'].astype(float)
+    pool_swap_df[f'p{num}.gasUsed'] = pool_swap_df['transaction.gasUsed']
+    pool_swap_df[f'p{num}.gasPrice'] = pool_swap_df['transaction.gasPrice']
+    pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['transaction.blockNumber']
+    pool_swap_df[f'p{num}.sender'] = pool_swap_df['sender']
+    pool_swap_df[f'p{num}.recipient'] = pool_swap_df['recipient']
+    pool_swap_df[f'p{num}.transaction_id'] = pool_swap_df['transaction.id']
+
+    # Create new columns with new calculations...
+    pool_swap_df[f'p{num}.transaction_type']=0
+    pool_swap_df[f'p{num}.transaction_rate']=transaction_rate
+    pool_swap_df[f'p{num}.eth_price_usd'] = ((pool_swap_df[f'p{num}.sqrtPriceX96'] / 2**96)**2 / 1e12) **-1
+    pool_swap_df[f'p{num}.gas_fees_usd'] = (pool_swap_df[f'p{num}.gasPrice'] / 1e9 )*(pool_swap_df[f'p{num}.gasUsed'] / 1e9) * pool_swap_df[f'p{num}.eth_price_usd']
+    pool_swap_df[f'p{num}.transaction_fees_usd'] = np.abs(pool_swap_df[f'p{num}.t1_amount'] * pool_swap_df[f'p{num}.transaction_rate']) * pool_swap_df[f'p{num}.eth_price_usd']
+    pool_swap_df[f'p{num}.total_fees_usd'] = pool_swap_df[f'p{num}.gas_fees_usd'] + pool_swap_df[f'p{num}.transaction_fees_usd']
+
+    # Filtering out zero dollar transactions
+    pool_swap_df = pool_swap_df[pool_swap_df[f'p{num}.t0_amount'] != 0]
+    pool_swap_df = pool_swap_df[pool_swap_df[f'p{num}.t1_amount'] != 0]
+    
+    # Reseting index
+    pool_swap_df.reset_index(drop=False)
+
+    p_df = pool_swap_df[['time',
+                        'timestamp',
+                        f'p{num}.transaction_time',
+                        f'p{num}.transaction_epoch_time',
+                        f'p{num}.t0_amount',
+                        f'p{num}.t1_amount',
+                        f'p{num}.t0_token',
+                        f'p{num}.t1_token',
+                        f'p{num}.tick',
+                        f'p{num}.sqrtPriceX96',
+                        f'p{num}.gasUsed',
+                        f'p{num}.gasPrice',
+                        f'p{num}.blockNumber',
+                        f'p{num}.sender',
+                        f'p{num}.recipient',
+                        f'p{num}.transaction_id',
+                        f'p{num}.transaction_type',
+                        f'p{num}.transaction_rate',        
+                        f'p{num}.eth_price_usd',
+                        f'p{num}.transaction_fees_usd',
+                        f'p{num}.gas_fees_usd',
+                        f'p{num}.total_fees_usd']]
+
+    
+    return p_df   
+
+def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
+    """
+    compatible with alchemy_request(...)
+    
+    Return: 
+    both_pools.columns = ['time', 'timestamp', 'p1.transaction_time', 'p1.transaction_epoch_time',
+       'p1.t0_amount', 'p1.t1_amount', 'p1.t0_token', 'p1.t1_token', 'p1.tick',
+       'p1.sqrtPriceX96', 'p1.gasUsed', 'p1.gasPrice', 'p1.blockNumber',
+       'p1.sender', 'p1.recipient', 'p1.transaction_id', 'p1.transaction_type',
+       'p1.transaction_rate', 'p1.eth_price_usd', 'p1.transaction_fees_usd',
+       'p1.gas_fees_usd', 'p1.total_fees_usd', 'p0.transaction_time',
+       'p0.transaction_epoch_time', 'p0.t0_amount', 'p0.t1_amount',
+       'p0.t0_token', 'p0.t1_token', 'p0.tick', 'p0.sqrtPriceX96',
+       'p0.gasUsed', 'p0.gasPrice', 'p0.blockNumber', 'p0.sender',
+       'p0.recipient', 'p0.transaction_id', 'p0.transaction_type',
+       'p0.transaction_rate', 'p0.eth_price_usd', 'p0.transaction_fees_usd',
+       'p0.gas_fees_usd', 'p0.total_fees_usd', 'percent_change',
+       'total_gas_fees_usd', 'total_transaction_rate',
+       'total_transaction_fees_used', 'total_fees_usd', 'swap_go_nogo']
+    """
+    # Renaming columsn to be compatible with data dictionary.
+    p0.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
+
+    # add other columns.
+    p0['timestamp'] = p0['time'].apply(lambda x: x.timestamp())
+    # TODO: how do i get this programmatically?
+    p0['pool.token0.name'] = 'USDC'
+    p0['pool.token1.name'] = 'WETH'
+
+    # Renaming columsn to be compatible with data dictionary.
+    p1.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
+    # add other columns.
+    p1['timestamp'] = p1['time'].apply(lambda x: x.timestamp())
+    p1['pool.token0.name'] = 'USDC'
+    p1['pool.token1.name'] = 'WETH'
+
+    pool0_swap_df = create_pool_df(p0,transaction_rate=p0_txn_fee,num=0)
+    pool1_swap_df = create_pool_df(p1,transaction_rate=p1_txn_fee,num=1)
+
+    # Merge with Forward Fill in Time
+    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp'], how='outer').sort_values(by='timestamp')
+    both_pools = both_pools.ffill().reset_index(drop=True)
+    ###########
+    # Add columns that include information from both pools.
+    #Both Pools<br>
+    #- percent_change - (p0.eth_price_usd-p1.eth_price_usd)/min(p1.eth_price_usd,p0.eth_price_usd)<br>
+    #- total_gas_fees_usd - sum of <br>
+    #- total_transaction_rate - p0.transaction_rate + p1.transaction_rate
+    #- total_transaction_fees_usd - sum of p0.transaction_fee_usd and p1.transaction_fee_usd<br>
+    #- total_fees_usd - sum of total_gas_fees_usd and total_transaction_fees_usd<br>
+    #- swap_go_nogo (1 or 0) - 1 if total_gas_fees_usd / (|percent_change| - total_transaction_rate) > 0 <br>
+    ######################
+    eth_price_min = both_pools[['p0.eth_price_usd','p1.eth_price_usd']].min(axis=1)
+    both_pools['percent_change'] = (both_pools['p0.eth_price_usd'] - both_pools['p1.eth_price_usd']) / eth_price_min
+    both_pools['total_gas_fees_usd'] = both_pools['p0.gas_fees_usd']+both_pools['p1.gas_fees_usd']
+    both_pools['total_transaction_rate'] = both_pools['p0.transaction_rate']+both_pools['p1.transaction_rate']
+    both_pools['total_transaction_fees_used'] = both_pools['p0.transaction_fees_usd']+both_pools['p1.transaction_fees_usd']
+    both_pools['total_fees_usd'] = both_pools['p0.gas_fees_usd']+both_pools['p1.gas_fees_usd']+both_pools['p0.transaction_fees_usd']+both_pools['p1.transaction_fees_usd']
+    both_pools['swap_go_nogo'] = (both_pools['total_gas_fees_usd'] / (np.abs(both_pools['percent_change']) - both_pools['total_transaction_rate']))>0
+    #TODO: the fill forward creates NaNs in columns which alters the data type of the column.  need to go back recast back to the expected type.
+    # remove first 40 rows with NaNs.
+    # both_pools = both_pools.iloc[40:]
+    # Before the transactions from the 'slower' pool have their first transaction,
+    # so of the fields for that pool (pool 0) will be NaNs.  We should attempt to filter those out.
+    both_pools['time'] = pd.to_datetime(both_pools['time'])
+    
+    # rows in a randomly selected day:
+    # num_rows = (both_pools[both_pools['time'].dt.date == pd.to_datetime("2024-03-13").date()]).shape[0]
+    
+    # Find the first row with NaNs...
+    new_first_row = both_pools['p1.eth_price_usd'].first_valid_index()
+    both_pools = both_pools.iloc[new_first_row:]
+
+    # Find the first row with NaNs...
+    new_first_row = both_pools['p0.eth_price_usd'].first_valid_index()
+    both_pools = both_pools.iloc[new_first_row:]
+    
+    has_nans = both_pools.isna().any().any()
+    print("Are there any NaNs in the DataFrame?", has_nans)
+
+    return both_pools
+
 def merge_pool_data(p0,p1):
+    """
+    compatible with etherscan_request(...)
+
+    Return: 
+    
+    both_pools.columns - ['time', 'timeStamp', 'blockNumber', 'p0.weth_to_usd_ratio', 'p0.gas_fees_usd',
+       'p1.weth_to_usd_ratio', 'p1.gas_fees_usd', 'percent_change',
+       'total_gas_fees_usd']
+    """
     #Format P0 and P0 variables of interest
     p0['time'] = p0['timeStamp'].apply(lambda x: datetime.fromtimestamp(x))
     p0['p0.weth_to_usd_ratio'] = p0['WETH_value']/p0['USDC_value']
