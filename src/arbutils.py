@@ -223,27 +223,26 @@ def LGBM_Preprocessing(both_pools, forecast_window_min=10, objective='train',tes
         print(f"LGBM_Preprocessing: Error - wrong objective specified ({objective}). Should be train, test or inference")
         return None
 
-def XGB_preprocessing(both_pools, forecast_window_min=10, objective='train', test_split=0.2):
+def XGB_preprocessing(both_pools, params, objective='train'):
+    
+    FORECAST_WINDOW_MIN = params['FORECAST_WINDOW_MIN']
+    N_WINDOW_AVERAGE_LIST = params['GAS_FEES_N_WINDOW_AVERAGE']
+    NUM_LAGS = params['GAS_FEES_NUM_LAGS']
+    OBJECTIVE = params['MODEL_OBJECTIVE']
+    TEST_SPLIT = params['TEST_SPLIT']
+
     int_df = both_pools.select_dtypes(include=['datetime64[ns]','int64', 'float64'])
     int_df = int_df[['time','total_gas_fees_usd']]
 
-    df_int = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', forecast_window_min)
+    df_int = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', FORECAST_WINDOW_MIN)
     df_int.index = df_int.pop('time')
     df_int.index = pd.to_datetime(df_int.index)
-
-    num_lags = 9  # Number of lags to create
-    for i in range(1, num_lags + 1):
-        df_int[f'lag_{i}'] = df_int['total_gas_fees_usd'].shift(i)
     
-    df_int['rolling_mean_3'] = df_int['total_gas_fees_usd'].rolling(window=3).mean()
-    df_int['rolling_mean_6'] = df_int['total_gas_fees_usd'].rolling(window=6).mean()
+    for i in range(1, NUM_LAGS + 1):
+        int_df[f'lag_{i}'] = int_df['total_gas_fees_usd'].shift(i)
     
-    #lag_features = [f'lag_{i}' for i in range(1, num_lags + 1)]
-    #X_gas_test = df_int[['total_gas_fees_usd']+lag_features + ['rolling_mean_3', 'rolling_mean_6']]
-    #y_gas_test = df_int['total_gas_fees_usd_label']
-    
-    #df_nan = df_nan[['total_gas_fees_usd', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8',
-    #   'lag_9', 'rolling_mean_3', 'rolling_mean_6']]
+    for i in N_WINDOW_AVERAGE_LIST:
+        int_df[f'rolling_mean_{i}'] = int_df['total_gas_fees_usd'].rolling(window=i).mean()
 
     if objective == 'inference':
         df_int = df_int[df_int['total_gas_fees_usd_label'].isna()]
@@ -265,10 +264,10 @@ def XGB_preprocessing(both_pools, forecast_window_min=10, objective='train', tes
         # Create labels and training...
         y = df_int.pop('total_gas_fees_usd_label')
         X = df_int.copy()
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_split, random_state=42,shuffle=False)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_SPLIT, random_state=42,shuffle=False)
         return X_train, X_test, y_train, y_test
     else:
-        print(f"XGB_Preprocessing: Error - wrong objective specified ({objective}). Should be train, test or inference")
+        print(f"XGB_Preprocessing: Error - wrong objective specified ({OBJECTIVE}). Should be train, test or inference")
         return None
 
 def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_col,percent_change_col,min_investment_col='min_amount_to_invest'):

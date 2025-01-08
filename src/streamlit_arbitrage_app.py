@@ -22,7 +22,26 @@ sns.set_style('darkgrid')
 
 import arbutils
 
-FORECAST_WINDOW_MIN=1
+# ################################
+# CONFIGURABLE PARAMETERS
+# ################################
+params = {
+    'FORECAST_WINDOW_MIN':1,
+    'TRAINING_DATA_PATH':"../../arbitrage_3M/",
+    'MODEL_PATH':"../models/",
+    # PCT_CHANGE model parameters (things that can be ablated using the same data)
+    "PCT_CHANGE_MODEL_NAME":"LGBM",
+    "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
+    "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+    "PCT_CHANGE_TEST_SPLIT":0.2,
+    # GAS_FEES model parameters (things that can be ablated using the same data)
+    "GAS_FEES_MODEL_NAME":"XGBoost",
+    "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
+    "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+    "GAS_FEES_TEST_SPLIT":0.2
+}
+
+forecast_window_minutes = params['FORECAST_WINDOW_MIN']
 
 # fetch data from Etherscan API
 @st.cache_data(ttl=60)
@@ -205,14 +224,14 @@ if st.button("Run Analysis"):
         both_pools = merge_pool_data(p0, p1)
 
         # percent_change Preprocessing for model prediction
-        X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, FORECAST_WINDOW_MIN, objective='test')
+        X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, params, objective='test')
         
         if X_pct_test is None or y_pct_test is None:
             st.error("Preprocessing for percent_change data failed. Cannot proceed with analysis.")
             raise Exception
 
         # gas_fee Preprocessing for model prediction
-        X_gas_test, y_gas_test = gas_fee_preprocessing(both_pools, FORECAST_WINDOW_MIN, objective='test')
+        X_gas_test, y_gas_test = gas_fee_preprocessing(both_pools, params, objective='test')
 
         if X_gas_test is None or y_gas_test is None:
             st.error("Preprocessing for gas fees data failed. Cannot proceed with analysis.")
@@ -221,7 +240,7 @@ if st.button("Run Analysis"):
 
         # Run percent_change model
         with st.spinner("Running Percent Change model..."):
-            pct_change_model = load_model(f"percent_change_{FORECAST_WINDOW_MIN}min_forecast_LGBM")
+            pct_change_model = load_model(f"percent_change_{forecast_window_minutes}min_forecast_LGBM")
             if pct_change_model is not None:
                 try:
                     y_pct_pred = pct_change_model.predict(X_pct_test, num_iteration=pct_change_model.best_iteration)
@@ -241,7 +260,7 @@ if st.button("Run Analysis"):
 
         # Run gas_fee model
         with st.spinner("Running Gas model..."):
-            gas_fee_model = load_model(f"gas_fees_{FORECAST_WINDOW_MIN}min_forecast_XGBoost")
+            gas_fee_model = load_model(f"gas_fees_{forecast_window_minutes}min_forecast_XGBoost")
             if gas_fee_model is not None:
                 try:
                     y_gas_pred = gas_fee_model.predict(X_gas_test)
@@ -284,11 +303,11 @@ if st.button("Run Analysis"):
         #  Section 3: Recommended investment based on latest transactions.
         #
         # ##########################################################################
-        st.subheader(f'Recommended Minimum Investment Prediction ({FORECAST_WINDOW_MIN} minute forecast)')
+        st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
 
         # Predictions on future transactions!
-        X_pct_change_infer = percent_change_preprocessing(both_pools, FORECAST_WINDOW_MIN, objective='inference')
-        X_gas_fee_infer = gas_fee_preprocessing(both_pools, FORECAST_WINDOW_MIN, objective='inference')
+        X_pct_change_infer = percent_change_preprocessing(both_pools, forecast_window_minutes, objective='inference')
+        X_gas_fee_infer = gas_fee_preprocessing(both_pools, forecast_window_minutes, objective='inference')
 
         y_pct_change_pred_latest = pct_change_model.predict(X_pct_change_infer, num_iteration=pct_change_model.best_iteration)
         y_gas_fee_pred_latest = gas_fee_model.predict(X_gas_fee_infer)
@@ -306,15 +325,15 @@ if st.button("Run Analysis"):
         time_difference = now - df_min['time'].iloc[-1]
 
         # Check if the difference is less than FORCAST_WINDOW_MIN minutes
-        is_less_than_x_minutes = time_difference < timedelta(minutes=FORECAST_WINDOW_MIN)
-        x_minutes = timedelta(minutes=FORECAST_WINDOW_MIN)
+        is_less_than_x_minutes = time_difference < timedelta(minutes=forecast_window_minutes)
+        x_minutes = timedelta(minutes=forecast_window_minutes)
         if is_less_than_x_minutes:
             if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
-                st.write(f'Arbitrage Opportunity is not expected {FORECAST_WINDOW_MIN} minute(s) from now.')
+                st.write(f'Arbitrage Opportunity is not expected {forecast_window_minutes} minute(s) from now.')
             elif  np.isnan(df_min['min_amount_to_invest_prediction'].iloc[-1]):
                 print("minimum amount to invest should not be NaN unless the units are so small they induce infinity...")
                 print(df_min.iloc[-1])
-                st.write(f'Arbitrage Opportunity is not expected {FORECAST_WINDOW_MIN} minute(s) from now.')
+                st.write(f'Arbitrage Opportunity is not expected {forecast_window_minutes} minute(s) from now.')
             else:
                 if df_min['percent_change_prediction'].iloc[-1] < 0:
                     st.write(f'**BUY**: Pool 0 ({pool0_address})')
@@ -329,7 +348,7 @@ if st.button("Run Analysis"):
                         "*Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected).*"
                 )                                
         else:
-            st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {FORECAST_WINDOW_MIN} minute(s) old, unable to provide minimum amount to invest")
+            st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {forecast_window_minutes} minute(s) old, unable to provide minimum amount to invest")
         
 
 
