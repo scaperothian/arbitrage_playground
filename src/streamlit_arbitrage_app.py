@@ -129,6 +129,62 @@ def calculate_profit(y_pct_test, y_pct_pred, y_gas_test, y_gas_pred, pool0_txn_f
     
     return df
 
+def create_min_investment_breakout(last_sample, pred_sample,pool0_txn_fee, pool1_txn_fee):
+    """
+    last_sample (DataSeries): 
+    pred_sample (DataSeries)
+    """
+    T_lt = f"{last_sample['time']}"
+    block_num = f"{last_sample['blockNumber']}"
+    block_num_pred = f"{int(last_sample['blockNumber']) + 5 * FORECAST_WINDOW_MIN}" # blocks created every 12s 
+    T_pred = f"{pred_sample['time']+timedelta(minutes=1)}"
+    A = f"{1/last_sample['p0.weth_to_usd_ratio']:.2f}"    # Pool 0 ETH / USDC
+    B = f"{pool0_txn_fee:.5f}"                               # Pool 0 Transaction Fee
+    C = f"{last_sample['p0.gas_fees_usd']:.2f}"           # Pool 0 Gas Fees
+    D = f"{1/last_sample['p1.weth_to_usd_ratio']:.2f}"    # Pool 1 ETH / USDC
+    E = f"{pool1_txn_fee:.5f}"                               # Pool 1 Transaction Fee
+    F = f"{last_sample['p1.gas_fees_usd']:.2f}"           # Pool 1 Gas Fees
+    G = f"{last_sample['percent_change']:.5f}"            # Percent Change in Transaction Price
+    H = f"{last_sample['total_gas_fees_usd']:.2f}"       # Total Gas Fees
+    J = f"{pred_sample['percent_change_prediction']:.5f}"
+    K = f"{pred_sample['gas_fees_prediction']:.2f}"
+
+    L = last_sample['total_gas_fees_usd'] / \
+                (
+                    (1 + abs(last_sample['percent_change'])) * (1 - pool1_txn_fee if last_sample['percent_change'] < 0 else 1 - pool0_txn_fee) -
+                    (1 - pool0_txn_fee if last_sample['percent_change'] < 0 else 1 - pool1_txn_fee)
+                )
+    L = f"{L:.2f}"
+    M = pred_sample['gas_fees_prediction'] / \
+                (
+                    (1 + abs(pred_sample['percent_change_prediction'])) * (1 - pool1_txn_fee if pred_sample['percent_change_prediction'] < 0 else 1 - pool0_txn_fee) -
+                    (1 - pool0_txn_fee if pred_sample['percent_change_prediction'] < 0 else 1 - pool1_txn_fee)
+                )
+    M = f"{M:.2f}"
+    
+    table_dict = {
+        'Last Transaction': [T_lt,block_num,A, B, C, D, E, F, G, H, L],
+        'Predicted': [T_pred,block_num_pred,'', B, '', '', E, '', J, K, M],
+        'Index': [
+            'Timestamp',
+            'Block Number',
+            'Pool 1 Transaction',
+            'Pool 1 Transaction Fee',
+            'Pool 1 Gas Fee',
+            'Pool 2 Transaction',
+            'Pool 2 Transaction Fee',
+            'Pool 2 Gas Fee',
+            'Percent Change',
+            'Total Gas Fees',
+            'Minimum Investment'
+        ]
+    }
+
+    # Convert the dictionary to a DataFrame
+    table_df = pd.DataFrame(table_dict)
+    table_df.set_index('Index', inplace=True)
+
+    return table_df
 
 
 def calculate_min_investment(y_pct_time, y_pct_pred,y_gas_time,y_gas_pred,pool0_txn_fees,pool1_txn_fees):
@@ -173,7 +229,7 @@ def load_model(model_name):
     try:
         with open(model_path, 'rb') as f:
             model = pickle.load(f)
-        st.success(f"Model {model_name} loaded successfully from {model_path}")
+        print(f"Model {model_name} loaded successfully from {model_path}")
         return model
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
@@ -484,18 +540,9 @@ if st.button("Run Analysis"):
         st.write(f"Root Mean Squared Error: {y_pct_rmse:.4f}")
         st.write(f"R² Score: {y_pct_r2:.4f}")
 
-        #figa, axsa = plt.subplots(1, 1, figsize=(14, 10))
-        #print(len(y_pct_pred), both_pools.shape[0])
-        #print(y_pct_pred[:30])
-        #axsa.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        #axsa.scatter(y_pct_test, y_pct_pred, marker='o')
-        #st.pyplot(figa)
-
         st.subheader("XGB Gas Fee Model Results")
         st.write(f"Root Mean Squared Error: {y_gas_rmse:.4f}")
         st.write(f"R² Score: {y_gas_r2:.4f}")
-
-
 
 
         # Price Plots
@@ -503,10 +550,8 @@ if st.button("Run Analysis"):
         fig3, axs3 = plt.subplots(2, 1, figsize=(14, 10))
         axs3[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
         axs3[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-
         axs3[0].scatter(both_pools['time'],1/both_pools['p0.weth_to_usd_ratio'], marker='o')
         axs3[0].scatter(both_pools['time'],1/both_pools['p1.weth_to_usd_ratio'], marker='x')
-
         axs3[0].set_title('Token Price for Pool 0 / Pool 1')
         axs3[0].legend(['Pool 0','Pool 1'])
         axs3[0].set_yscale('log')
@@ -517,15 +562,12 @@ if st.button("Run Analysis"):
         both_pools_concat = both_pools.iloc[-50:]
         axs3[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
         axs3[1].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-
         axs3[1].scatter(both_pools_concat['time'],1/both_pools_concat['p0.weth_to_usd_ratio'], marker='o')
         axs3[1].scatter(both_pools_concat['time'],1/both_pools_concat['p1.weth_to_usd_ratio'], marker='x')
-        
         axs3[1].set_title('Close in Token Price for Pool 0 / Pool 1')
         axs3[1].legend(['Pool 0','Pool 1'])
         axs3[1].set_xlabel('time')
         axs3[1].set_ylabel('USD per Eth (log scale)')
-
         st.pyplot(fig3)
 
 
@@ -534,18 +576,13 @@ if st.button("Run Analysis"):
         fig4, axs4 = plt.subplots(1, 1, figsize=(14, 10))
         axs4.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
         axs4.xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-
         axs4.scatter(both_pools['time'],both_pools['p0.gas_fees_usd'], marker='o')
         axs4.scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
-
         axs4.set_title('Gas Price for Pool 0 / Pool 1')
         axs4.legend(['Pool 0','Pool 1'])
         axs4.set_yscale('log')
         axs4.set_xlabel('time')
         axs4.set_ylabel('Gas prices in USD (log scale)')
-
-
-        # Display the figure in Streamlit
         st.pyplot(fig4)
 
         
@@ -554,53 +591,8 @@ if st.button("Run Analysis"):
         last_sample_ds = both_pools.iloc[-1]
         last_sample_ds_pred = df_min.iloc[-1]
 
-        A = f"{1/last_sample_ds['p0.weth_to_usd_ratio']:.2f}"    # Pool 0 ETH / USDC
-        B = f"{pool0_txn_fee:.5f}"                               # Pool 0 Transaction Fee
-        C = f"{last_sample_ds['p0.gas_fees_usd']:.2f}"           # Pool 0 Gas Fees
-        D = f"{1/last_sample_ds['p1.weth_to_usd_ratio']:.2f}"    # Pool 1 ETH / USDC
-        E = f"{pool1_txn_fee:.5f}"                               # Pool 1 Transaction Fee
-        F = f"{last_sample_ds['p1.gas_fees_usd']:.2f}"           # Pool 1 Gas Fees
-        G = f"{last_sample_ds['percent_change']:.5f}"            # Percent Change in Transaction Price
-        H = f"{last_sample_ds['total_gas_fees_usd']:.2f}"       # Total Gas Fees
-        J = f"{last_sample_ds_pred['percent_change_prediction']:.5f}"
-        K = f"{last_sample_ds_pred['gas_fees_prediction']:.2f}"
-
-        L = last_sample_ds['total_gas_fees_usd'] / \
-                    (
-                        (1 + abs(last_sample_ds['percent_change'])) * (1 - pool1_txn_fee if last_sample_ds['percent_change'] < 0 else 1 - pool0_txn_fee) -
-                        (1 - pool0_txn_fee if last_sample_ds['percent_change'] < 0 else 1 - pool1_txn_fee)
-                    )
-        L = f"{L:.2f}"
-        M = last_sample_ds_pred['gas_fees_prediction'] / \
-                    (
-                        (1 + abs(last_sample_ds_pred['percent_change_prediction'])) * (1 - pool1_txn_fee if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - pool0_txn_fee) -
-                        (1 - pool0_txn_fee if last_sample_ds_pred['percent_change_prediction'] < 0 else 1 - pool1_txn_fee)
-                    )
-        M = f"{M:.2f}"
-        
-        table_dict = {
-            'Last Transaction': [A, B, C, D, E, F, G, H, L],
-            'Predicted': ['', B, '', '', E, '', J, K, M],
-            'Index': [
-                'Pool 1 Transaction',
-                'Pool 1 Transaction Fee',
-                'Pool 1 Gas Fee',
-                'Pool 2 Transaction',
-                'Pool 2 Transaction Fee',
-                'Pool 2 Gas Fee',
-                'Percent Change',
-                'Total Gas Fees',
-                'Minimum Investment'
-            ]
-        }
-
-        # Convert the dictionary to a DataFrame
-        table_df = pd.DataFrame(table_dict)
-        table_df.set_index('Index', inplace=True)
-        #table_df['Last Transaction'] = table_df['Last Transaction'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
-        #table_df['Predicted'] = table_df['Predicted'].apply(lambda x: f"{x:.2e}" if isinstance(x, (int, float)) else x)
+        table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, pool0_txn_fee, pool1_txn_fee)
 
         st.table(table_df)
-
 
 

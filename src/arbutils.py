@@ -114,9 +114,9 @@ def merge_pool_data(p0,p1):
     p1['p1.gas_fees_usd'] = ((p1['gasPrice']/1e9)*(p1['gasUsed']/1e9)*(1/p1['p1.weth_to_usd_ratio']))
 
     #Merge Pool data
-    both_pools = pd.merge(p0[['time','timeStamp','p0.weth_to_usd_ratio','p0.gas_fees_usd']],
-                          p1[['time','timeStamp','p1.weth_to_usd_ratio','p1.gas_fees_usd']],
-                          on=['time','timeStamp'], how='outer'
+    both_pools = pd.merge(p0[['time','timeStamp','blockNumber','p0.weth_to_usd_ratio','p0.gas_fees_usd']],
+                          p1[['time','timeStamp','blockNumber','p1.weth_to_usd_ratio','p1.gas_fees_usd']],
+                          on=['time','timeStamp','blockNumber'], how='outer'
                          ).sort_values(by='timeStamp')
     both_pools = both_pools.ffill().reset_index(drop=True)
     both_pools = both_pools.dropna()
