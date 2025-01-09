@@ -4,16 +4,14 @@ import unittest
 import pandas as pd
 import numpy as np
 
-from src.arbutils import load_model, etherscan_request, alchemy_request, merge_pool_data, merge_pool_data_v2, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
+from src.arbutils import load_model, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
+from src.etherscanutils import etherscan_request, merge_pool_data
+from src.alchemyutils import alchemy_request, merge_pool_data_v2
 
 from sklearn.metrics import root_mean_squared_error, r2_score
 
 import warnings
 warnings.filterwarnings("ignore", message="Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.")
-
-# Add environmental variable ALCHEMY_API_KEY
-ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
-ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
 
 # API inputs
 pool0_address = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
@@ -22,7 +20,11 @@ pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 class TestAppMethods(unittest.TestCase):
     
     def test_alchemy_request(self):
-        
+                
+        # Add environmental variable ALCHEMY_API_KEY
+        ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
+        ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
+
         df_results = alchemy_request(ALCHEMY_URL, pool_address=pool0_address, blocks_to_look_back=40, latest_block=21582391)
         valid_columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
                     'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
