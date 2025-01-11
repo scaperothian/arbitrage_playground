@@ -161,7 +161,7 @@ def decode_block_data(url, swap_tx_data, block_number,transaction_hash,datatype_
         'block_number':block_number,
     }
 
-def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0):
+def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0,verbose=False):
     """
     Return: DataFrame with df.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
        'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
@@ -182,8 +182,9 @@ def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0):
     pool_tx_rawdata = fetch_block_range(url, pool_address, latest_block_number, nblocks)
     ntxs_found = len(pool_tx_rawdata)
     finish = time.time()
-    print(f"Found {ntxs_found} Swap Transactions from {latest_block_number-nblocks} to {latest_block_number}")
-    print(f"Time to fetch blocks: {finish-start}")
+    if verbose: 
+        print(f"Found {ntxs_found} Swap Transactions from {latest_block_number-nblocks} to {latest_block_number}")
+        print(f"Time to fetch blocks: {finish-start}")
     
     # Parse the raw data, decode blocks.  Each call the decode_block_data has one call in it, 
     # to fetch the timestamp, so beware rate limit gods.
@@ -267,7 +268,7 @@ def fetch_with_retries(url, batch_request, max_retries=5, initial_wait=1, max_wa
     raise Exception("Failed to fetch data after multiple retries")
 
 
-def fetch_block_details(url, pool_df,include_all_objects=True):
+def fetch_block_details(url, pool_df,include_all_objects=True, verbose=False):
 
     # Get the blocks in chunks of MAX_BLOCKS
     all_blockdata = []
@@ -290,7 +291,8 @@ def fetch_block_details(url, pool_df,include_all_objects=True):
         except Exception as e:
             print(f"Request failed after multiple retries: {e}")
         finish = time.time()
-        print(f"Time to process {len(block_number_chunk)} blocks: {finish-start}")
+        if verbose: 
+            print(f"Time to process {len(block_number_chunk)} blocks: {finish-start}")
     
     
         #display(pool0_merge.shape
@@ -448,7 +450,7 @@ def create_pool_df(pool_in,transaction_rate,t0_res=18, t1_res=18, num=0):
     
     return p_df    
 
-def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
+def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee, verbose=False):
     """
     From the original data dictionary...
     
@@ -524,7 +526,8 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     both_pools = both_pools.iloc[new_first_row:]
     
     has_nans = both_pools.isna().any().any()
-    print("Are there any NaNs in the DataFrame?", has_nans)
+    if verbose: 
+        print("Are there any NaNs in the DataFrame?", has_nans)
 
     return both_pools
 
