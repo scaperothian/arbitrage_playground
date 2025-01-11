@@ -46,10 +46,20 @@ model_params = {
 
 forecast_window_minutes = model_params['FORECAST_WINDOW_MIN']
 
-# fetch data from Etherscan API
+# fetch data from mainnet
 @st.cache_data(ttl=60)
-def etherscan_request(api_key, address, startblock=0, endblock=99999999, sort='desc'):
-    results = arbutils.etherscan_request(api_key, address, startblock, endblock, sort)
+def fetch_data(api_key, address, method='etherscan'):
+    if method == 'etherscan':
+        results = arbutils.etherscan_request(api_key, address)
+    elif method == 'alchemy':
+        raise NotImplementedError("fetch_data: Alchemy method not implemented.")
+    elif method == 'thegraph':
+        raise NotImplementedError("fetch_data: The Graph method not implemented.")
+    elif method == 'file':
+        raise NotImplementedError("fetch_data: From file not implemented.")
+    else:
+        raise NotImplementedError(f"fetch_data: Unknown fetch method requested: {method}")
+    
     if type(results)!=pd.DataFrame: 
         st.error(results[1])
     else:
@@ -272,8 +282,8 @@ st.write(f'Selected Budget: {threshold}')
 if st.button("Run Analysis"):
     with st.spinner("Fetching and processing data..."):
         # Fetch and process data for both pools
-        p0 = etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
-        p1 = etherscan_request(ETHERSCAN_API_KEY, address=pool1_address)
+        p0 = fetch_data(ETHERSCAN_API_KEY, address=pool0_address)
+        p1 = fetch_data(ETHERSCAN_API_KEY, address=pool1_address)
         
         if p0 is None or p1 is None:
             st.error("Failed to fetch data from Etherscan. Please check your API key and try again.")
@@ -349,10 +359,10 @@ if st.button("Run Analysis"):
         avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
         median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].median()
 
-        avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-                            & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
-        med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-                            & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
+        #avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+        #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
+        #med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+        #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
 
         number_of_simulated_swaps = df_final.shape[0]
 
@@ -416,15 +426,17 @@ if st.button("Run Analysis"):
         #  Section 1: Rollup stats from past transactions
         #
         # ##########################################################################
+        st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
+
+        st.write(f"Number of Transactions: {number_of_simulated_swaps}")
+        st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
+        st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
+        
         df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
                             & (df_final['min_amount_to_invest_prediction'] < threshold)]
         
         df_gain = df_valid_txns[(df_valid_txns['Profit'] > 0)]
 
-        st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
-        st.write(f"Number of Transactions: {number_of_simulated_swaps}")
-        st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
-        st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
         st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
         st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
         

@@ -540,8 +540,8 @@ if __name__ == "__main__":
     POOL1_ADDRESS="0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8" # USDC / WETH (0.3%)
     POOl1_TXN_FEE = 0.003
 
-    # Ethereum is estimated to have a transaction speed of one block per 15 seconds (4 times a minute).
-    LAST_60MIN_BLOCKS= int(np.floor(4 * 60))
+    # Ethereum is estimated to have a transaction speed of one block per 12 seconds (5 times a minute).
+    LAST_60MIN_BLOCKS= int(np.floor(5 * 60))
 
     # Use the same latest block for both requests...
     # better to do the least frequent of the two second

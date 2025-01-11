@@ -60,7 +60,7 @@ def etherscan_request(api_key, address, startblock=0, endblock=99999999, sort='d
     current_timestamp = df['timeStamp'].iloc[0]  # Current time in seconds since epoch
 
     # Calculate the timestamp for 24 hours ago
-    threshold_timestamp = current_timestamp - (12 * 60 * 60)  # 24 hours in seconds
+    threshold_timestamp = current_timestamp - (24 * 60 * 60)  # 24 hours in seconds
 
     # Filter the DataFrame to include only rows within the last 24 hours
     df = df[df['timeStamp'] >= threshold_timestamp]
