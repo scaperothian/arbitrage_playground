@@ -1,13 +1,252 @@
 import os
 import pickle
-
+import requests
+import datetime
+import time
+import pytz
 import numpy as np
 import pandas as pd
 
+
+from web3 import Web3
+
 from sklearn.model_selection import train_test_split
 
-<<<<<<< HEAD
-=======
+def fetch_latest_block(etherscan_api_key):
+    """
+    Used with etherscan_requests_v2: u
+    sed as a support method to find a block range for requests for inference.
+
+    """
+    # Parameters for the API request
+    params = {
+        "module": "proxy",
+        "action": "eth_blockNumber",
+        "apikey": etherscan_api_key
+    }
+    
+    # Make the request
+    base_url = "https://api.etherscan.io/api"
+
+    response = requests.get(base_url, params=params)
+    
+    if response.status_code != 200:
+        #st.error(f"API request failed with status code {response.status_code}")
+        (f"API request failed with status code {response.status_code}") 
+        return None
+    
+    # Handle the response
+    if response.status_code == 200:
+        result = response.json()
+        if result.get("status") != "0" and "result" in result:
+
+            latest_block = int(result['result'], 16)  # Convert hex to int
+            #print(f"Latest Block Number: {latest_block}")
+            return latest_block
+        else:
+            print(f"Unexpected response or error: {result.get('message', 'Unknown error')}")
+            return None
+    else:
+        print(f"Failed to fetch the latest block. Status code: {response.status_code}")
+        return None
+
+# Decode the sqrtPriceX96 from the logs
+def decode_data(logs,transaction_hashes):
+    base_url = "https://api.etherscan.io/api"
+    w3 = Web3(Web3.HTTPProvider(base_url))
+
+    # Uniswap V3 Swap event ABI
+    # The topic for the Swap event in Uniswap V3 (Swap event signature)
+    # https://www.4byte.directory/event-signatures/?bytes_signature=0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67
+    swap_event = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+    swap_event_abi = {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "address", "name": "sender", "type": "address"},
+            {"indexed": False, "internalType": "int256", "name": "amount0", "type": "int256"},
+            {"indexed": False, "internalType": "int256", "name": "amount1", "type": "int256"},
+            {"indexed": False, "internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160"},
+            {"indexed": False, "internalType": "uint128", "name": "liquidity", "type": "uint128"},
+            {"indexed": False, "internalType": "int24", "name": "tick", "type": "int24"}
+        ],
+        "name": "Swap",
+        "type": "event"
+    }
+    # For Decoding Data Field
+    datatype_list = [i['type'] for i in swap_event_abi['inputs'] if not i['indexed']]
+    raw_data = []
+    for log in logs:
+        if swap_event in log["topics"] and log["transactionHash"] in transaction_hashes:
+            block = int(log['blockNumber'],16)
+            transaction_hash=log['transactionHash']
+            data = log['data']
+            amount0, amount1, sqrt_price_x96, liquidity, tick = w3.eth.codec.decode(datatype_list,bytes.fromhex(data[2:]))
+            raw_data.append((block,amount0, amount1, sqrt_price_x96, liquidity, tick,transaction_hash))
+    return raw_data
+
+# Function to fetch logs from a block
+# Function to fetch logs from a block
+def fetch_logs_for_block(api_key, block_number, pool_address):
+
+    base_url = "https://api.etherscan.io/api"
+
+    params = {
+        "module": "logs",
+        "action": "getLogs",
+        "fromBlock": block_number,
+        "toBlock": block_number,
+        "address": pool_address,
+        "apikey": api_key,
+    }
+    data = {'result':[]}
+    #while not data['result']:
+    response = requests.get(base_url, params=params)
+    data = response.json()
+
+    if data.get("status") == "1" and "result" in data:
+        return data["result"]
+    else:
+        raise ValueError(f"ValueError fetching logs for block {block_number}: {data.get('message', 'Unknown error')}")
+
+def fetch_block_data(etherscan_api_key, block_numbers, time_stamps, transaction_hashes, pool_address):
+    """
+    works for etherscan_requests_v2
+    """
+    results = {'timeStamp':[], 'blockNumber':[], 'sqrtPriceX96':[], 'transactionHash':[],'tick':[],'amount0':[],'amount1':[],'liquidity':[]}
+
+    for block,timestamp in zip(block_numbers,time_stamps):
+        try:
+            logs = fetch_logs_for_block(etherscan_api_key, block, pool_address)
+            
+        except Exception as e:
+            print(f"Error fetching logs: {e} (ignoring for now)")
+        
+        try:
+            data_in_block = decode_data(logs,transaction_hashes)
+
+            for block,amount0, amount1, sqrt_price_x96, liquidity, tick,transaction_hash in data_in_block:
+                results['timeStamp'].append(timestamp)
+                results['blockNumber'].append(block)
+                results['sqrtPriceX96'].append(sqrt_price_x96)
+                results['transactionHash'].append(transaction_hash)
+                results['tick'].append(tick)
+                results['liquidity'].append(liquidity)
+                results['amount0'].append(amount0)
+                results['amount1'].append(amount1)
+            print(".",end='')
+
+        except Exception as e:
+            print(f"Error decoding logs {block}: {e} (ignoring for now)")
+        
+    return  pd.DataFrame(results)
+
+def etherscan_request_v2(etherscan_api_key, pool_address):
+    """
+    
+    """
+    MAX_SAMPLES = 10
+
+    # fetch block numbers for the last hour.
+    # Assumes that there is at least one transaction from both pools
+    # and more than ten transactions total.
+    endblock = fetch_latest_block(etherscan_api_key)
+    startblock = endblock-5 * 60
+    if endblock: 
+        print(f"Start Block: {startblock}")
+        print(f"Stop Block: {endblock}")
+
+    try: 
+        pool = fetch_tokentx_data(etherscan_api_key, pool_address)
+
+        endtime = int(pool['timeStamp'].iloc[0])
+        beginningtime = int(pool['timeStamp'].iloc[-1])
+        print(f"Successfully fetched {pool.shape[0]} swaps in the last {(endtime -beginningtime)/60:.2f} minutes.")
+
+        # truncate to MAX_SAMPLES
+        pool = pool.iloc[-1*MAX_SAMPLES:]
+        #print(f"{pool.shape}")
+
+        pool_data = fetch_block_data(etherscan_api_key, 
+                                               list(pool['blockNumber'].unique()), 
+                                               list(pool['timeStamp'].unique()),
+                                                list(pool['transactionHash']),
+                                               pool_address)
+        pool = pool.merge(pool_data,on=['timeStamp','blockNumber','transactionHash'],how='left').dropna().reset_index(drop=True)
+        pool['datetime'] = pool['timeStamp'].apply(lambda x: datetime.datetime.fromtimestamp(int(x), tz=pytz.UTC))
+        print(f"{pool.blockNumber}")
+        return pool[['transactionHash','datetime','timeStamp','sqrtPriceX96','blockNumber','gasPrice','gasUsed','tick','amount0','amount1','liquidity']]
+
+    except Exception as e: 
+        print(e)
+
+def fetch_tokentx_data(etherscan_api_key, pool_address, start_block=0, end_block=99999999):
+
+    base_url = 'https://api.etherscan.io/api'
+
+    params = {
+        'module': 'account',
+        'action': 'tokentx',
+        'address': pool_address,
+        'startblock': start_block,
+        'endblock': end_block,
+        'sort': 'desc',
+        'apikey': etherscan_api_key
+    }
+    
+    
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        #st.error(f"API request failed with status code {response.status_code}")
+        raise Exception(f"API request failed with status code {response.status_code}")
+    
+    data = response.json()
+    if data['status'] != '1':
+        #st.error(f"API returned an error: {data['result']}")
+        raise Exception(f"API returned an error: {data['result']}")
+    
+    df = pd.DataFrame(data['result'])
+    
+    expected_columns = ['hash', 'blockNumber', 'timeStamp', 'from', 'to', 'gas', 'gasPrice', 'gasUsed', 'cumulativeGasUsed', 'confirmations', 'tokenSymbol', 'value', 'tokenName']
+    
+    for col in expected_columns:
+        if col not in df.columns:
+            raise Exception(f"Expected column '{col}' is missing from the response")
+    
+    df.sort_values(by='timeStamp')
+    
+    consolidated_data = {}
+
+    for index, row in df.iterrows():
+        tx_hash = row['hash']
+        
+        if tx_hash not in consolidated_data:
+            consolidated_data[tx_hash] = {
+                'blockNumber': np.int32(row['blockNumber']),
+                'timeStamp': int(row['timeStamp']),
+                'transactionHash': tx_hash,
+                'from': row['from'],
+                'to': row['to'],
+                'WETH_value': 0,
+                'USDC_value': 0,
+                'tokenName_WETH': '',
+                'tokenName_USDC': '',
+                'gas': int(row['gas']),
+                'gasPrice': int(row['gasPrice']),
+                'gasUsed': int(row['gasUsed']),
+                'cumulativeGasUsed': int(row['cumulativeGasUsed']),
+                'confirmations': row['confirmations']
+            }
+        
+        if row['tokenSymbol'] == 'WETH':
+            consolidated_data[tx_hash]['WETH_value'] = row['value']
+            consolidated_data[tx_hash]['tokenName_WETH'] = row['tokenName']
+        elif row['tokenSymbol'] == 'USDC':
+            consolidated_data[tx_hash]['USDC_value'] = row['value']
+            consolidated_data[tx_hash]['tokenName_USDC'] = row['tokenName']
+
+    final_df = pd.DataFrame.from_dict(consolidated_data, orient='index').reset_index(drop=True)
+
+    return final_df.sort_values(by='timeStamp')
 
 def etherscan_request(api_key, address, startblock=0, endblock=99999999, sort='desc'):
 
@@ -162,8 +401,8 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
     pool_swap_df[f'p{num}.gasUsed'] = pool_swap_df['transaction.gasUsed']
     pool_swap_df[f'p{num}.gasPrice'] = pool_swap_df['transaction.gasPrice']
     pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['transaction.blockNumber']
-    pool_swap_df[f'p{num}.sender'] = pool_swap_df['sender']
-    pool_swap_df[f'p{num}.recipient'] = pool_swap_df['recipient']
+    #pool_swap_df[f'p{num}.sender'] = pool_swap_df['sender']
+    #pool_swap_df[f'p{num}.recipient'] = pool_swap_df['recipient']
     pool_swap_df[f'p{num}.transaction_id'] = pool_swap_df['transaction.id']
 
     # Create new columns with new calculations...
@@ -194,8 +433,8 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
                         f'p{num}.gasUsed',
                         f'p{num}.gasPrice',
                         f'p{num}.blockNumber',
-                        f'p{num}.sender',
-                        f'p{num}.recipient',
+                        #f'p{num}.sender',
+                        #f'p{num}.recipient',
                         f'p{num}.transaction_id',
                         f'p{num}.transaction_type',
                         f'p{num}.transaction_rate',        
@@ -209,7 +448,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
 
 def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     """
-    compatible with alchemy_request(...)
+    compatible with etherscan_request_v2(...)
     
     Return: 
     both_pools.columns = ['time', 'timestamp', 'p1.transaction_time', 'p1.transaction_epoch_time',
@@ -227,19 +466,20 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
        'total_gas_fees_usd', 'total_transaction_rate',
        'total_transaction_fees_used', 'total_fees_usd', 'swap_go_nogo']
     """
-    # Renaming columsn to be compatible with data dictionary.
-    p0.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
+    p0 = p0.copy()
+    p1 = p1.copy()
 
-    # add other columns.
-    p0['timestamp'] = p0['time'].apply(lambda x: x.timestamp())
+    # Renaming columns to be compatible with data dictionary.
+    p0.columns = ['transaction.id','time','timestamp','sqrtPriceX96','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','tick','amount0','amount1','liquidity']
+
     # TODO: how do i get this programmatically?
     p0['pool.token0.name'] = 'USDC'
     p0['pool.token1.name'] = 'WETH'
 
     # Renaming columsn to be compatible with data dictionary.
-    p1.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
-    # add other columns.
-    p1['timestamp'] = p1['time'].apply(lambda x: x.timestamp())
+    p1.columns = ['transaction.id','time','timestamp','sqrtPriceX96','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','tick','amount0','amount1','liquidity']
+    
+    # TODO: how do i get this programmatically?
     p1['pool.token0.name'] = 'USDC'
     p1['pool.token1.name'] = 'WETH'
 
@@ -271,7 +511,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     # both_pools = both_pools.iloc[40:]
     # Before the transactions from the 'slower' pool have their first transaction,
     # so of the fields for that pool (pool 0) will be NaNs.  We should attempt to filter those out.
-    both_pools['time'] = pd.to_datetime(both_pools['time'])
+    #both_pools['time'] = pd.to_datetime(both_pools['time'],tz='UTC')
     
     # rows in a randomly selected day:
     # num_rows = (both_pools[both_pools['time'].dt.date == pd.to_datetime("2024-03-13").date()]).shape[0]
@@ -328,10 +568,9 @@ def merge_pool_data(p0,p1):
     both_pools.dropna(inplace=True)
     return both_pools
 
->>>>>>> main
 def find_closest_timestamp(df, time_col, label_key, minutes):
-    # Ensure 'time' column is in datetime format
-    df.loc[:, time_col] = pd.to_datetime(df[time_col])
+    # Note: 'time' must be in a timezone aware  datetime format
+    #df.loc[:, time_col] = pd.to_datetime(df[time_col])
 
     # Create a shifted version of the DataFrame with the target times
     shifted_df = df.copy()
@@ -397,7 +636,6 @@ def LGBM_Preprocessing(both_pools, params, objective='train'):
 
     # Create time index for the dataframe to preserve timestamps with splits.
     int_df.index = int_df.pop('time')
-    int_df.index = pd.to_datetime(int_df.index)
 
     if objective == 'inference':
         int_df = int_df[int_df['percent_change_label'].isna()]
@@ -437,7 +675,7 @@ def XGB_preprocessing(both_pools, params, objective='train'):
 
     int_df = find_closest_timestamp(int_df, 'time', 'total_gas_fees_usd', FORECAST_WINDOW_MIN)
     int_df.index = int_df.pop('time')
-    int_df.index = pd.to_datetime(int_df.index)
+    #int_df.index = pd.to_datetime(int_df.index)
     
     for i in range(1, NUM_LAGS + 1):
         int_df[f'lag_{i}'] = int_df['total_gas_fees_usd'].shift(i)

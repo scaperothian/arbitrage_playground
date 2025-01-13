@@ -27,9 +27,9 @@ import etherscanutils
 import alchemyutils
 
 # Fetch the API key from environment variables
-#ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY")
-ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+#ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY")
+#ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
 
 
 # ################################
@@ -52,11 +52,23 @@ model_params = {
 }
 
 forecast_window_minutes = model_params['FORECAST_WINDOW_MIN']
+pct_change_model_name = model_params['PCT_CHANGE_MODEL_NAME']
+gas_fees_model_name = model_params['GAS_FEES_MODEL_NAME']
+
 
 # fetch data from mainnet
 @st.cache_data(ttl=60)
-def fetch_data(api_key, address, method='etherscan'):
+def fetch_data(api_key, address, method='etherscan_legacy'):
+    """
+    etherscan_legacy: legacy method (fast mode).  does not use sqrtPriceX96 (training data for models use this value).
+                    percent changes are inflated.  much, much faster to return data for analysis and
+                    inference because the fetch does not rely on decoding actual transaction data blocks.
+    etherscan (preferred): uses sqrtPriceX96 value.  Note: today you cannot do 12 hour analysis on minimum
+                    investment because of the time to fetch that much data.
+    """
     if method == 'etherscan':
+        results = arbutils.etherscan_request_v2(api_key, address)
+    elif method == 'etherscan_legacy':
         results = arbutils.etherscan_request(api_key, address)
     elif method == 'alchemy':
         raise NotImplementedError("fetch_data: Alchemy method not implemented.")
@@ -68,7 +80,7 @@ def fetch_data(api_key, address, method='etherscan'):
         raise NotImplementedError(f"fetch_data: Unknown fetch method requested: {method}")
     
     if type(results)!=pd.DataFrame: 
-        st.error(results[1])
+        st.error(results)
     else:
         return results
 
@@ -272,6 +284,8 @@ pool0_txn_fee = float(st.sidebar.selectbox(label="Pool 0 Transaction Fee (${T_0}
 pool1_address = st.sidebar.text_input("Pool 1 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
 pool1_txn_fee = float(st.sidebar.selectbox(label="Pool 1 Transaction Fee (${T_1}$)",options=[0.01, 0.003,0.0005,0.0001],index=1)) #select 0.003 by default.
 
+analysis_strategy = st.sidebar.selectbox(label="How to analyze data: ",options=["fast etherscan (legacy)", "etherscan v2 (recommended)"],index=1) 
+
 st.sidebar.markdown(
     '[Back to Main Page (mydiamondhands)](https://mydiamondhands.io/)',
     unsafe_allow_html=True
@@ -285,54 +299,106 @@ st.write(
     "Use this app to experiment with different cross-liquidity pool arbitrage scenarios in WETH/USDC liquidity pools. Enter an Etherscan API key, your budget,  and click run to simulate performance."
 )
 
-threshold = st.slider('Select Budget', min_value=1000, max_value=40000, value=10000, step=500)
-st.write(f'Selected Budget: {threshold}')
+####################################################
+# Run Inference Upfront
+####################################################
+# Fetch and process data for both pools
+p0 = fetch_data(ETHERSCAN_API_KEY, address=pool0_address, method='etherscan')
+p1 = fetch_data(ETHERSCAN_API_KEY, address=pool1_address, method='etherscan')
 
+if p0 is None or p1 is None:
+    st.error("Failed to fetch data from Etherscan. Please check your API key and try again.")
+    raise Exception
+
+both_pools = arbutils.merge_pool_data_v2(p0, pool0_txn_fee, p1, pool1_txn_fee)
+
+# percent_change Preprocessing for model prediction
+X_pct_change_infer = percent_change_preprocessing(both_pools, model_params, objective='inference')
+
+if X_pct_change_infer is None:
+    st.error("Preprocessing for percent_change data failed. Cannot proceed with analysis.")
+    raise Exception
+
+# gas_fee Preprocessing for model prediction
+X_gas_fee_infer = gas_fee_preprocessing(both_pools, model_params, objective='inference')
+
+if X_gas_fee_infer is None:
+    st.error("Preprocessing for gas fees data failed. Cannot proceed with analysis.")
+    raise Exception
+
+# Run models
+with st.spinner("Running Percent Change model..."):
+    model_name_str = f"percent_change_{forecast_window_minutes}min_forecast_{pct_change_model_name}"
+    pct_change_model = load_model(model_name_str)    
+    try: 
+        # Predictions!
+        y_pct_change_pred_latest = pct_change_model.predict(X_pct_change_infer)
+    except Exception as e:
+        err_msg = f"Error running percent change model ({model_name_str}): {str(e)}" 
+        st.error(err_msg)
+        raise Exception(err_msg)
+
+with st.spinner("Running Gas model..."):
+    gas_fee_model = load_model(f"gas_fees_{forecast_window_minutes}min_forecast_{gas_fees_model_name}")
+    try: 
+        # Predictions!
+        y_gas_fee_pred_latest = gas_fee_model.predict(X_gas_fee_infer)
+    except Exception as e:
+        err_msg = f"Error running gas fees model (gas_fees_{forecast_window_minutes}min_forecast_{gas_fees_model_name}): {str(e)}" 
+        st.error(err_msg)
+        raise Exception(err_msg)
+
+df_min = calculate_min_investment(X_pct_change_infer.index,
+                                y_pct_change_pred_latest,
+                                X_gas_fee_infer.index,
+                                y_gas_fee_pred_latest,
+                                pool0_txn_fee,
+                                pool1_txn_fee)
+
+# Get the current time with the desired timezone
+timezone = pytz.timezone("UTC")  # Replace "UTC" with your desired timezone (e.g., "America/New_York")
+now = datetime.now(timezone)
+
+# Difference between current time and last timestamp
+time_difference = now - df_min['time'].iloc[-1]
+
+# Check if the difference is less than FORCAST_WINDOW_MIN minutes
+is_less_than_x_minutes = time_difference < timedelta(minutes=forecast_window_minutes)
+x_minutes = timedelta(minutes=forecast_window_minutes)
+if is_less_than_x_minutes:
+    if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
+        st.write(f'Arbitrage Opportunity is not expected {forecast_window_minutes} minute(s) from now.')
+    elif  np.isnan(df_min['min_amount_to_invest_prediction'].iloc[-1]):
+        print("minimum amount to invest should not be NaN unless the units are so small they induce infinity...")
+        print(df_min.iloc[-1])
+        st.write(f'Arbitrage Opportunity is not expected {forecast_window_minutes} minute(s) from now.')
+    else:
+        if df_min['percent_change_prediction'].iloc[-1] < 0:
+            st.write(f'**BUY**: Pool 0 ({pool0_address})')
+            st.write(f'**SELL**: Pool 1 ({pool1_address})')
+            st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
+        else:
+            st.write(f'**BUY**: Pool 1 ({pool1_address})')
+            st.write(f'**SELL**: Pool 0 ({pool0_address})')
+            st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
+    
+        st.write(
+                "*Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected).*"
+        )                                
+else:
+    st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {forecast_window_minutes} minute(s) old, unable to provide minimum amount to invest")
+
+
+
+"""
 if st.button("Run Analysis"):
     with st.spinner("Fetching and processing data..."):
-        # Use the same latest block for both requests...
-        # better to do the least frequent of the two second
-        latest_block_number = alchemyutils.fetch_latest_block(ALCHEMY_URL)
-        LAST_120MIN_BLOCKS= int(np.floor(5 * 120))
-
-        # Fetch and process data for both pools
-<<<<<<< HEAD
-        #p0 = etherscanutils.etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
-        p0 = alchemyutils.alchemy_request(ALCHEMY_URL, address=pool0_address, blocks_to_look_back=LAST_120MIN_BLOCKS, latest_block=latest_block_number)
-        if p0 is None:
-            st.error("Failed to fetch data from Etherscan for Pool 0. Please check your API key and try again.")
-=======
-        p0 = fetch_data(ETHERSCAN_API_KEY, address=pool0_address)
-        p1 = fetch_data(ETHERSCAN_API_KEY, address=pool1_address)
+        #
+        # fetch data, preprocess, load model, perform inference 
+        #
+        if analysis_strategy == "etherscan (recommended)":
+            
         
-        if p0 is None or p1 is None:
-            st.error("Failed to fetch data from Etherscan. Please check your API key and try again.")
->>>>>>> main
-            raise Exception
-        #p1 = etherscanutils.etherscan_request(ETHERSCAN_API_KEY, address=pool1_address)
-        p1 = alchemyutils.alchemy_request(ALCHEMY_URL, address=pool1_address, blocks_to_look_back=LAST_120MIN_BLOCKS, latest_block=latest_block_number)
-        if p1 is None:
-            st.error("Failed to fetch data from Etherscan for Pool 1. Please check your API key and try again.")
-            raise Exception       
-
-        
-        #both_pools = etherscanutils.merge_pool_data(p0, p1)
-        both_pools = alchemyutils.merge_pool_data_v2(p0, pool0_txn_fee, p1, pool1_txn_fee)
-
-        # percent_change Preprocessing for model prediction
-        X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, model_params, objective='test')
-
-        if X_pct_test is None or y_pct_test is None:
-            st.error("Preprocessing for percent_change data failed. Cannot proceed with analysis.")
-            raise Exception
-
-        # gas_fee Preprocessing for model prediction
-        X_gas_test, y_gas_test = gas_fee_preprocessing(both_pools, model_params, objective='test')
-
-        if X_gas_test is None or y_gas_test is None:
-            st.error("Preprocessing for gas fees data failed. Cannot proceed with analysis.")
-            raise Exception
-
         # Run percent_change model
         with st.spinner("Running Percent Change model..."):
             pct_change_model = load_model(f"percent_change_{forecast_window_minutes}min_forecast_LGBM")
@@ -374,8 +440,6 @@ if st.button("Run Analysis"):
                 st.error("Failed to load gas fees model. Skipping gas fees analysis.")
                 raise Exception
 
-<<<<<<< HEAD
-=======
         # Process final results
         df_final = calculate_profit(y_pct_test,
                                     y_pct_pred,
@@ -395,7 +459,6 @@ if st.button("Run Analysis"):
 
         number_of_simulated_swaps = df_final.shape[0]
 
->>>>>>> main
         # ##########################################################################
         #
         #  Section 3: Recommended investment based on latest transactions.
@@ -403,54 +466,7 @@ if st.button("Run Analysis"):
         # ##########################################################################
         st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
 
-        # Predictions on future transactions!
-        X_pct_change_infer = percent_change_preprocessing(both_pools, model_params, objective='inference')
-        X_gas_fee_infer = gas_fee_preprocessing(both_pools, model_params, objective='inference')
-
-        y_pct_change_pred_latest = pct_change_model.predict(X_pct_change_infer, num_iteration=pct_change_model.best_iteration)
-        y_gas_fee_pred_latest = gas_fee_model.predict(X_gas_fee_infer)
-        
-        df_min = calculate_min_investment(X_pct_change_infer.index,
-                                        y_pct_change_pred_latest,
-                                        X_gas_fee_infer.index,
-                                        y_gas_fee_pred_latest,
-                                        pool0_txn_fee,
-                                        pool1_txn_fee)
-
-        # Get the current time with the desired timezone
-        timezone = pytz.timezone("UTC")  # Replace "UTC" with your desired timezone (e.g., "America/New_York")
-        now = datetime.now(timezone)
-        
-        # Difference between current time and last timestamp
-        time_difference = now - df_min['time'].iloc[-1]
-
-        # Check if the difference is less than FORCAST_WINDOW_MIN minutes
-        is_less_than_x_minutes = time_difference < timedelta(minutes=forecast_window_minutes)
-        x_minutes = timedelta(minutes=forecast_window_minutes)
-        if is_less_than_x_minutes:
-            if df_min['min_amount_to_invest_prediction'].iloc[-1] < 0:
-                st.write(f'Arbitrage Opportunity is not expected {forecast_window_minutes} minute(s) from now.')
-            elif  np.isnan(df_min['min_amount_to_invest_prediction'].iloc[-1]):
-                print("minimum amount to invest should not be NaN unless the units are so small they induce infinity...")
-                print(df_min.iloc[-1])
-                st.write(f'Arbitrage Opportunity is not expected {forecast_window_minutes} minute(s) from now.')
-            else:
-                if df_min['percent_change_prediction'].iloc[-1] < 0:
-                    st.write(f'**BUY**: Pool 0 ({pool0_address})')
-                    st.write(f'**SELL**: Pool 1 ({pool1_address})')
-                    st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
-                else:
-                    st.write(f'**BUY**: Pool 1 ({pool1_address})')
-                    st.write(f'**SELL**: Pool 0 ({pool0_address})')
-                    st.write(f'**Minimum amount to invest**: ${df_min["min_amount_to_invest_prediction"].iloc[-1]:.2f} at time: {df_min["time"].iloc[-1]+x_minutes}')
-            
-                st.write(
-                        "*Disclaimer: The creators of this app are not licensed to provide, offer or recommend financial instruments in any way shape or form. This information and the information within the site should not be considered unique financial advice and if you consider utilizing the model, or investing in crypto you should first seek financial advice from a trained professional, to ensure that you fully understand the risk. Further, while modelling efforts have been undertaken in an effort to avoid risk through the application of the principles of arbitrage, the model has not been empirically tested, and should be approached with extreme caution, care and be utilized at one’s own risk (do not make trades to which you would be unable to fulfill, or would be in a detrimental financial position if it was to not complete as expected).*"
-                )                                
-        else:
-            st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {forecast_window_minutes} minute(s) old, unable to provide minimum amount to invest")
-        
-
+ 
 
 
         # ##########################################################################
@@ -458,21 +474,6 @@ if st.button("Run Analysis"):
         #  Section 1: Rollup stats from past transactions
         #
         # ##########################################################################
-<<<<<<< HEAD
-        # Process final results
-        df_final = calculate_profit(y_pct_test,
-                                    y_pct_pred,
-                                    y_gas_test,
-                                    y_gas_pred,
-                                    pool0_txn_fee,
-                                    pool1_txn_fee)
-
-        experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
-        number_of_transactions = df_final.shape[0]
-
-        st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
-        st.write(f"Number of Transactions: {number_of_transactions}")
-=======
         st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
 
         st.write(f"Number of Transactions: {number_of_simulated_swaps}")
@@ -487,12 +488,11 @@ if st.button("Run Analysis"):
         st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
         st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
         
-        st.write("""*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
+        st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
                     using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
                     that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
                     pool to use which impacts performance.*
-                    """)
->>>>>>> main
+                    ")
 
         if df_final[df_final['min_amount_to_invest_prediction']>0].shape[0] != 0:
 
@@ -517,11 +517,11 @@ if st.button("Run Analysis"):
             if df_valid_txns.shape[0] > 0:
                 st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
             
-            st.write("""*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
+            st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
                         using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
                         that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
                         pool to use which impacts performance.*
-                        """)
+                        ")
 
             #TODO: attempt to understand how really large price flucuations should be taken into account for 
             #      scenarios where there is losses (i.e. profit is largely negative - greater than 100000 as calculated).
@@ -663,5 +663,5 @@ if st.button("Run Analysis"):
         table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, forecast_window_minutes,pool0_txn_fee, pool1_txn_fee)
 
         st.table(table_df)
-
+"""
 
