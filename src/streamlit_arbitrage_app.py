@@ -390,278 +390,295 @@ else:
 
 
 
-"""
-if st.button("Run Analysis"):
-    with st.spinner("Fetching and processing data..."):
-        #
-        # fetch data, preprocess, load model, perform inference 
-        #
-        if analysis_strategy == "etherscan (recommended)":
-            
-        
-        # Run percent_change model
-        with st.spinner("Running Percent Change model..."):
-            pct_change_model = load_model(f"percent_change_{forecast_window_minutes}min_forecast_LGBM")
-            if pct_change_model is not None:
-                try:
-                    y_pct_pred = pct_change_model.predict(X_pct_test, num_iteration=pct_change_model.best_iteration)
-                    
-                    if y_pct_pred is None: 
-                        st.error("Error Running percent_change model")
+if False: 
+    if st.button("Run Analysis"):
+        with st.spinner("Fetching and processing data..."):
+            #
+            # fetch data, preprocess, load model, perform inference 
+            #
+            p0 = fetch_data(ETHERSCAN_API_KEY, address=pool0_address, method='etherscan_legacy')
+            p1 = fetch_data(ETHERSCAN_API_KEY, address=pool1_address, method='etherscan_legacy')
 
-                    y_pct_rmse = root_mean_squared_error(y_pct_test, y_pct_pred)
-                    y_pct_r2 = r2_score(y_pct_test, y_pct_pred)
-                    
-                except Exception as e:
-                    st.error(f"Error running percent_change model: {str(e)}")
-                    raise Exception
-            else:
-                st.error("Failed to load percent_change model. Skipping percent_change analysis.")
+            if p0 is None or p1 is None:
+                st.error("Failed to fetch data from Etherscan. Please check your API key and try again.")
                 raise Exception
 
-        # Run gas_fee model
-        with st.spinner("Running Gas model..."):
-            gas_fee_model = load_model(f"gas_fees_{forecast_window_minutes}min_forecast_XGBoost")
-            if gas_fee_model is not None:
-                try:
-                    y_gas_pred = gas_fee_model.predict(X_gas_test)
-                    
-                    if y_gas_pred is None: 
-                        st.error("Error Running gas fees model")
+            both_pools = arbutils.merge_pool_data_v2(p0, pool0_txn_fee, p1, pool1_txn_fee)
+
+            # percent_change Preprocessing for model prediction
+            X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, model_params, objective='test')
+
+            if X_pct_test is None:
+                st.error("Preprocessing for percent_change data failed. Cannot proceed with analysis.")
+                raise Exception
+
+            # gas_fee Preprocessing for model prediction
+            X_gas_test, y_gas_test = gas_fee_preprocessing(both_pools, model_params, objective='test')
+
+            if X_gas_test is None:
+                st.error("Preprocessing for gas fees data failed. Cannot proceed with analysis.")
+                raise Exception
+
+            # Run percent_change model
+            with st.spinner("Running Percent Change model..."):
+                #pct_change_model = load_model(f"percent_change_{forecast_window_minutes}min_forecast_LGBM")
+                if pct_change_model is not None:
+                    try:
+                        y_pct_pred = pct_change_model.predict(X_pct_test, num_iteration=pct_change_model.best_iteration)
+                        
+                        if y_pct_pred is None: 
+                            st.error("Error Running percent_change model")
+
+                        y_pct_rmse = root_mean_squared_error(y_pct_test, y_pct_pred)
+                        y_pct_r2 = r2_score(y_pct_test, y_pct_pred)
+                        
+                    except Exception as e:
+                        st.error(f"Error running percent_change model: {str(e)}")
                         raise Exception
+                else:
+                    st.error("Failed to load percent_change model. Skipping percent_change analysis.")
+                    raise Exception
 
-                    y_gas_rmse = root_mean_squared_error(y_gas_test, y_gas_pred)
-                    y_gas_r2 = r2_score(y_gas_test, y_gas_pred)
+            # Run gas_fee model
+            with st.spinner("Running Gas model..."):
+                #gas_fee_model = load_model(f"gas_fees_{forecast_window_minutes}min_forecast_XGBoost")
+                if gas_fee_model is not None:
+                    try:
+                        y_gas_pred = gas_fee_model.predict(X_gas_test)
+                        
+                        if y_gas_pred is None: 
+                            st.error("Error Running gas fees model")
+                            raise Exception
 
-
-                except Exception as e:
-                    st.error(f"Error running gas fees model: {str(e)}")
-            else:
-                st.error("Failed to load gas fees model. Skipping gas fees analysis.")
-                raise Exception
-
-        # Process final results
-        df_final = calculate_profit(y_pct_test,
-                                    y_pct_pred,
-                                    y_gas_test,
-                                    y_gas_pred,
-                                    pool0_txn_fee,
-                                    pool1_txn_fee)
-
-        experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
-        avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
-        median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].median()
-
-        #avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-        #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
-        #med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-        #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
-
-        number_of_simulated_swaps = df_final.shape[0]
-
-        # ##########################################################################
-        #
-        #  Section 3: Recommended investment based on latest transactions.
-        #
-        # ##########################################################################
-        st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
-
- 
+                        y_gas_rmse = root_mean_squared_error(y_gas_test, y_gas_pred)
+                        y_gas_r2 = r2_score(y_gas_test, y_gas_pred)
 
 
-        # ##########################################################################
-        #
-        #  Section 1: Rollup stats from past transactions
-        #
-        # ##########################################################################
-        st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
+                    except Exception as e:
+                        st.error(f"Error running gas fees model: {str(e)}")
+                else:
+                    st.error("Failed to load gas fees model. Skipping gas fees analysis.")
+                    raise Exception
 
-        st.write(f"Number of Transactions: {number_of_simulated_swaps}")
-        st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
-        st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
-        
-        df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-                            & (df_final['min_amount_to_invest_prediction'] < threshold)]
-        
-        df_gain = df_valid_txns[(df_valid_txns['Profit'] > 0)]
+            # Process final results
+            df_final = calculate_profit(y_pct_test,
+                                        y_pct_pred,
+                                        y_gas_test,
+                                        y_gas_pred,
+                                        pool0_txn_fee,
+                                        pool1_txn_fee)
 
-        st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
-        st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
-        
-        st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
-                    using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
-                    that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
-                    pool to use which impacts performance.*
-                    ")
-
-        if df_final[df_final['min_amount_to_invest_prediction']>0].shape[0] != 0:
-
+            experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
             avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
             median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].median()
 
-            avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-                                & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
-            med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-                                & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
+            #avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+            #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
+            #med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+            #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
 
+            number_of_simulated_swaps = df_final.shape[0]
 
+            # ##########################################################################
+            #
+            #  Section 3: Recommended investment based on latest transactions.
+            #
+            # ##########################################################################
+            st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
 
-            df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0)]
+            # ##########################################################################
+            #
+            #  Section 1: Rollup stats from past transactions
+            #
+            # ##########################################################################
+            st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
+
+            st.write(f"Number of Transactions: {number_of_simulated_swaps}")
+            st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
+            st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
+            
+            df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+                                & (df_final['min_amount_to_invest_prediction'] < threshold)]
             
             df_gain = df_valid_txns[(df_valid_txns['Profit'] > 0)]
 
-            st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
-            st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
             st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
-
-            if df_valid_txns.shape[0] > 0:
-                st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
+            st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
             
-            st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
-                        using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
-                        that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
-                        pool to use which impacts performance.*
-                        ")
+            #st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
+            #            using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
+            #            that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
+            #            pool to use which impacts performance.*
+            #            ")
 
-            #TODO: attempt to understand how really large price flucuations should be taken into account for 
-            #      scenarios where there is losses (i.e. profit is largely negative - greater than 100000 as calculated).
-            #      But you can't loose more money than you put in, so what's wrong with the calculus?
-            #st.write(f"Average Return on Transactions with Detected Arbitrage Opportunites: ${avg_profit:.2f}")
-            #st.write(f"Median Return on Transactions with Detected Arbitrage Opportunites: ${med_profit:.2f}")
+            if df_final[df_final['min_amount_to_invest_prediction']>0].shape[0] != 0:
+
+                avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
+                median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].median()
+
+                avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+                                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
+                med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
+                                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
 
 
-            st.subheader(f"Recommended Minimum Investment in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s).")
+
+                df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0)]
+                
+                df_gain = df_valid_txns[(df_valid_txns['Profit'] > 0)]
+
+                st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
+                st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
+                st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
+
+                if df_valid_txns.shape[0] > 0:
+                    st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
+                
+                #st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
+                #            using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
+                #            that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
+                #            pool to use which impacts performance.*
+                #            ")
+
+                #TODO: attempt to understand how really large price flucuations should be taken into account for 
+                #      scenarios where there is losses (i.e. profit is largely negative - greater than 100000 as calculated).
+                #      But you can't loose more money than you put in, so what's wrong with the calculus?
+                #st.write(f"Average Return on Transactions with Detected Arbitrage Opportunites: ${avg_profit:.2f}")
+                #st.write(f"Median Return on Transactions with Detected Arbitrage Opportunites: ${med_profit:.2f}")
+
+
+                st.subheader(f"Recommended Minimum Investment in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s).")
+                
+                # ##########################################################################
+                #
+                #  Section 2a: Scatter plot of Recommended Minimum Investment Amount over time
+                #
+                # ##########################################################################
+                fig2, axs2 = plt.subplots(2, 1, figsize=(14, 10))
+
+                axs2[0].scatter(df_final['time'], df_final['min_amount_to_invest_prediction'], marker='o')
+                axs2[0].set_xlabel('time')
+                axs2[0].set_ylabel('Recommended Minimum Amount to Invest')
+                max_ylim = df_final['min_amount_to_invest_prediction'].max()
+
+                # Add horizontal line at the threshold
+                axs2[0].axhline(y=threshold, color='black', linestyle='--', label=f'Threshold = {threshold}')
+                # Add annotation to the line
+                axs2[0].annotate(
+                    "Selected Budget",
+                    xy=(df_final['time'].min(), threshold),  # Far right of the plot
+                    xytext=(10, 5),  # Offset to position the text just above the line
+                    textcoords="offset points",
+                    fontsize=8,  # Small font size
+                    color='black',  # Same color as the line
+                    ha='left',  # Align text to the left
+                    va='bottom'  # Align text above the line
+                )
+
+                #axs[0].set_ylim(0, max_ylim * 1.2)
+                axs2[0].set_yscale('log')
+                axs2[0].set_title(f'Scatter Plot of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
+
+                # Format the x-axis to show HH:MM:SS
+                axs2[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+                axs2[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+                #fig.autofmt_xdate()  # Rotates the labels to prevent overlap
+
+                # ##########################################################################
+                #
+                #  Section 2b: Histogram Recommended Minimum Investment Amount bounded by
+                #            "budget" threshold
+                #
+                # ##########################################################################
+                df_final_fig2b = df_final[
+                    (df_final['min_amount_to_invest_prediction'] > 0) & 
+                    (df_final['min_amount_to_invest_prediction'] < threshold)
+                ][['min_amount_to_invest_prediction']]
+
+                # Calculate histogram data
+                data = df_final_fig2b['min_amount_to_invest_prediction']
+                hist_values, bin_edges = np.histogram(data, bins=50)
+
+                # Plot the histogram
+                axs2[1].hist(data, bins=50, alpha=0.7)
+                axs2[1].set_xlabel('Recommended Minimum Amount to Invest')
+                axs2[1].set_title(f'Distribution of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
+                axs2[1].set_xlim(0, threshold)                
+                
+                # Display the figure in Streamlit
+                st.pyplot(fig2)
+            else:
+                st.write(f"There were no arbitrage opportunites in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)")
+
+
+
+
+            # ##########################################################################
+            #
+            #  Section 4: Raw data for deeper dive.
+            #
+            # ##########################################################################
+
+            st.subheader("Raw Results")
+            st.write(df_final.sort_values(by='time',ascending=False))
+
+            st.subheader("LGBM Price Model Results")
+            st.write(f"Root Mean Squared Error: {y_pct_rmse:.4f}")
+            st.write(f"R² Score: {y_pct_r2:.4f}")
+
+            st.subheader("XGB Gas Fee Model Results")
+            st.write(f"Root Mean Squared Error: {y_gas_rmse:.4f}")
+            st.write(f"R² Score: {y_gas_r2:.4f}")
+
+
+            # Price Plots
+            st.subheader(f'Pool Price Data')
+            fig3, axs3 = plt.subplots(2, 1, figsize=(14, 10))
+            axs3[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            axs3[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+            axs3[0].scatter(both_pools['time'],both_pools['p0.eth_price_usd'], marker='o')
+            axs3[0].scatter(both_pools['time'],both_pools['p1.eth_price_usd'], marker='x')
+            axs3[0].set_title('Token Price for Pool 0 / Pool 1')
+            axs3[0].legend(['Pool 0','Pool 1'])
+            axs3[0].set_yscale('log')
+            axs3[0].set_xlabel('time')
+            axs3[0].set_ylabel('USD per Eth (log scale)')
+
+
+            both_pools_trunc = both_pools.iloc[-50:]
+            axs3[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            axs3[1].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+            axs3[1].scatter(both_pools_trunc['time'],both_pools_trunc['p0.eth_price_usd'], marker='o')
+            axs3[1].scatter(both_pools_trunc['time'],both_pools_trunc['p1.eth_price_usd'], marker='x')
+            axs3[1].set_title('Zoomed in Token Price for Pool 0 / Pool 1')
+            axs3[1].legend(['Pool 0','Pool 1'])
+            axs3[1].set_xlabel('time')
+            axs3[1].set_ylabel('USD per Eth (log scale)')
+            st.pyplot(fig3)
+
+
+            # Gas Price Plots
+            st.subheader(f'Gas Price Data')
+            fig4, axs4 = plt.subplots(1, 1, figsize=(14, 10))
+            axs4.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            axs4.xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+            axs4.scatter(both_pools['time'],both_pools['p0.gas_fees_usd'], marker='o')
+            axs4.scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
+            axs4.set_title('Gas Price for Pool 0 / Pool 1')
+            axs4.legend(['Pool 0','Pool 1'])
+            axs4.set_yscale('log')
+            axs4.set_xlabel('time')
+            axs4.set_ylabel('Gas prices in USD (log scale)')
+            st.pyplot(fig4)
+
             
-            # ##########################################################################
-            #
-            #  Section 2a: Scatter plot of Recommended Minimum Investment Amount over time
-            #
-            # ##########################################################################
-            fig2, axs2 = plt.subplots(2, 1, figsize=(14, 10))
+            # Build Minimum Investment Breakout Table
+            st.subheader('Minimum Investment Calculation Breakout')
+            last_sample_ds = both_pools.iloc[-1]
+            last_sample_ds_pred = df_min.iloc[-1]
 
-            axs2[0].scatter(df_final['time'], df_final['min_amount_to_invest_prediction'], marker='o')
-            axs2[0].set_xlabel('time')
-            axs2[0].set_ylabel('Recommended Minimum Amount to Invest')
-            max_ylim = df_final['min_amount_to_invest_prediction'].max()
+            table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, forecast_window_minutes,pool0_txn_fee, pool1_txn_fee)
 
-            # Add horizontal line at the threshold
-            axs2[0].axhline(y=threshold, color='black', linestyle='--', label=f'Threshold = {threshold}')
-            # Add annotation to the line
-            axs2[0].annotate(
-                "Selected Budget",
-                xy=(df_final['time'].min(), threshold),  # Far right of the plot
-                xytext=(10, 5),  # Offset to position the text just above the line
-                textcoords="offset points",
-                fontsize=8,  # Small font size
-                color='black',  # Same color as the line
-                ha='left',  # Align text to the left
-                va='bottom'  # Align text above the line
-            )
+            st.table(table_df)
 
-            #axs[0].set_ylim(0, max_ylim * 1.2)
-            axs2[0].set_yscale('log')
-            axs2[0].set_title(f'Scatter Plot of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
-
-            # Format the x-axis to show HH:MM:SS
-            axs2[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-            axs2[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-            #fig.autofmt_xdate()  # Rotates the labels to prevent overlap
-
-            # ##########################################################################
-            #
-            #  Section 2b: Histogram Recommended Minimum Investment Amount bounded by
-            #            "budget" threshold
-            #
-            # ##########################################################################
-            df_final_fig2b = df_final[
-                (df_final['min_amount_to_invest_prediction'] > 0) & 
-                (df_final['min_amount_to_invest_prediction'] < threshold)
-            ][['min_amount_to_invest_prediction']]
-
-            # Calculate histogram data
-            data = df_final_fig2b['min_amount_to_invest_prediction']
-            hist_values, bin_edges = np.histogram(data, bins=50)
-
-            # Plot the histogram
-            axs2[1].hist(data, bins=50, alpha=0.7)
-            axs2[1].set_xlabel('Recommended Minimum Amount to Invest')
-            axs2[1].set_title(f'Distribution of Recommended Minimum Investment in last {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
-            axs2[1].set_xlim(0, threshold)                
-            
-            # Display the figure in Streamlit
-            st.pyplot(fig2)
-        else:
-            st.write(f"There were no arbitrage opportunites in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)")
-
-
-
-
-        # ##########################################################################
-        #
-        #  Section 4: Raw data for deeper dive.
-        #
-        # ##########################################################################
-
-        st.subheader("Raw Results")
-        st.write(df_final.sort_values(by='time',ascending=False))
-
-        st.subheader("LGBM Price Model Results")
-        st.write(f"Root Mean Squared Error: {y_pct_rmse:.4f}")
-        st.write(f"R² Score: {y_pct_r2:.4f}")
-
-        st.subheader("XGB Gas Fee Model Results")
-        st.write(f"Root Mean Squared Error: {y_gas_rmse:.4f}")
-        st.write(f"R² Score: {y_gas_r2:.4f}")
-
-
-        # Price Plots
-        st.subheader(f'Pool Price Data')
-        fig3, axs3 = plt.subplots(2, 1, figsize=(14, 10))
-        axs3[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        axs3[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-        axs3[0].scatter(both_pools['time'],both_pools['p0.eth_price_usd'], marker='o')
-        axs3[0].scatter(both_pools['time'],both_pools['p1.eth_price_usd'], marker='x')
-        axs3[0].set_title('Token Price for Pool 0 / Pool 1')
-        axs3[0].legend(['Pool 0','Pool 1'])
-        axs3[0].set_yscale('log')
-        axs3[0].set_xlabel('time')
-        axs3[0].set_ylabel('USD per Eth (log scale)')
-
-
-        both_pools_trunc = both_pools.iloc[-50:]
-        axs3[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        axs3[1].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-        axs3[1].scatter(both_pools_trunc['time'],both_pools_trunc['p0.eth_price_usd'], marker='o')
-        axs3[1].scatter(both_pools_trunc['time'],both_pools_trunc['p1.eth_price_usd'], marker='x')
-        axs3[1].set_title('Zoomed in Token Price for Pool 0 / Pool 1')
-        axs3[1].legend(['Pool 0','Pool 1'])
-        axs3[1].set_xlabel('time')
-        axs3[1].set_ylabel('USD per Eth (log scale)')
-        st.pyplot(fig3)
-
-
-        # Gas Price Plots
-        st.subheader(f'Gas Price Data')
-        fig4, axs4 = plt.subplots(1, 1, figsize=(14, 10))
-        axs4.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        axs4.xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-        axs4.scatter(both_pools['time'],both_pools['p0.gas_fees_usd'], marker='o')
-        axs4.scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
-        axs4.set_title('Gas Price for Pool 0 / Pool 1')
-        axs4.legend(['Pool 0','Pool 1'])
-        axs4.set_yscale('log')
-        axs4.set_xlabel('time')
-        axs4.set_ylabel('Gas prices in USD (log scale)')
-        st.pyplot(fig4)
-
-        
-        # Build Minimum Investment Breakout Table
-        st.subheader('Minimum Investment Calculation Breakout')
-        last_sample_ds = both_pools.iloc[-1]
-        last_sample_ds_pred = df_min.iloc[-1]
-
-        table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, forecast_window_minutes,pool0_txn_fee, pool1_txn_fee)
-
-        st.table(table_df)
-"""
 
