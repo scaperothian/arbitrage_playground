@@ -764,8 +764,6 @@ def thegraph_request(api_key, pool_address, new_date=None, old_date=None, data_p
                 'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
                 'liquidity']]
 
-
-
 def merge_pool_data(p0,p1):
     """
     compatible with etherscan_request(...)
