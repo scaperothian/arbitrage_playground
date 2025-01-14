@@ -400,7 +400,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
     pool_swap_df[f'p{num}.sqrtPriceX96'] = pool_swap_df['sqrtPriceX96'].astype(float)
     pool_swap_df[f'p{num}.gasUsed'] = pool_swap_df['transaction.gasUsed']
     pool_swap_df[f'p{num}.gasPrice'] = pool_swap_df['transaction.gasPrice']
-    pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['transaction.blockNumber']
+    #pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['transaction.blockNumber']
     #pool_swap_df[f'p{num}.sender'] = pool_swap_df['sender']
     #pool_swap_df[f'p{num}.recipient'] = pool_swap_df['recipient']
     pool_swap_df[f'p{num}.transaction_id'] = pool_swap_df['transaction.id']
@@ -422,6 +422,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
 
     p_df = pool_swap_df[['time',
                         'timestamp',
+                        'blockNumber',
                         f'p{num}.transaction_time',
                         f'p{num}.transaction_epoch_time',
                         f'p{num}.t0_amount',
@@ -432,7 +433,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
                         f'p{num}.sqrtPriceX96',
                         f'p{num}.gasUsed',
                         f'p{num}.gasPrice',
-                        f'p{num}.blockNumber',
+                        #f'p{num}.blockNumber',
                         #f'p{num}.sender',
                         #f'p{num}.recipient',
                         f'p{num}.transaction_id',
@@ -470,14 +471,14 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     p1 = p1.copy()
 
     # Renaming columns to be compatible with data dictionary.
-    p0.columns = ['transaction.id','time','timestamp','sqrtPriceX96','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','tick','amount0','amount1','liquidity']
+    p0.columns = ['transaction.id','time','timestamp','sqrtPriceX96','blockNumber','transaction.gasPrice','transaction.gasUsed','tick','amount0','amount1','liquidity']
 
     # TODO: how do i get this programmatically?
     p0['pool.token0.name'] = 'USDC'
     p0['pool.token1.name'] = 'WETH'
 
     # Renaming columsn to be compatible with data dictionary.
-    p1.columns = ['transaction.id','time','timestamp','sqrtPriceX96','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','tick','amount0','amount1','liquidity']
+    p1.columns = ['transaction.id','time','timestamp','sqrtPriceX96','blockNumber','transaction.gasPrice','transaction.gasUsed','tick','amount0','amount1','liquidity']
     
     # TODO: how do i get this programmatically?
     p1['pool.token0.name'] = 'USDC'
@@ -487,7 +488,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     pool1_swap_df = create_pool_df(p1,transaction_rate=p1_txn_fee,num=1)
 
     # Merge with Forward Fill in Time
-    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp'], how='outer').sort_values(by='timestamp')
+    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp','blockNumber'], how='outer').sort_values(by='timestamp')
     both_pools = both_pools.ffill().reset_index(drop=True)
     ###########
     # Add columns that include information from both pools.
@@ -540,12 +541,12 @@ def merge_pool_data(p0,p1):
        'total_gas_fees_usd']
     """
     #Format P0 and P0 variables of interest
-    p0['time'] = p0['timeStamp'].apply(lambda x: datetime.fromtimestamp(x))
+    p0['time'] = p0['timeStamp'].apply(lambda x: datetime.datetime.fromtimestamp(x))
     p0['p0.weth_to_usd_ratio'] = p0['WETH_value']/p0['USDC_value']
     p0['gasPrice'] = p0['gasPrice'].astype(float)
     p0['gasUsed']= p0['gasUsed'].astype(float)
     p0['p0.gas_fees_usd'] = ((p0['gasPrice']/1e9)*(p0['gasUsed']/1e9)*(1/p0['p0.weth_to_usd_ratio']))
-    p1['time'] = p1['timeStamp'].apply(lambda x: datetime.fromtimestamp(x))
+    p1['time'] = p1['timeStamp'].apply(lambda x: datetime.datetime.fromtimestamp(x))
     p1['p1.weth_to_usd_ratio'] = p1['WETH_value']/p1['USDC_value']
     p1['gasPrice'] = p1['gasPrice'].astype(float)
     p1['gasUsed']= p1['gasUsed'].astype(float)

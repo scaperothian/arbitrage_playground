@@ -15,6 +15,7 @@ lightgbm = "^4.5.0"
 seaborn = "^0.13.2"
 ipykernel = "^6.29.5"
 web3 = "^7.6.1"
+python-dotenv = "^1.0.1"
 
 [build-system]
 requires = ["poetry-core"]
