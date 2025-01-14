@@ -23,12 +23,6 @@ import seaborn as sns
 sns.set_style('darkgrid')
 
 import arbutils
-import etherscanutils
-import alchemyutils
-
-
-#ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
-
 
 # ################################
 # CONFIGURABLE PARAMETERS
@@ -91,7 +85,55 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
         merged_pools = arbutils.merge_pool_data(p0, p1)
     
     elif method == 'thegraph':
-        raise NotImplementedError("fetch_data: The Graph method not implemented.")
+        p0 = arbutils.thegraph_request(api_key, 
+                                    address0,
+                                    new_date=None, 
+                                    old_date=None, 
+                                    data_path=None, 
+                                    checkpoint_file=None)
+        if (p0 is None) or (type(p0)==str):
+            st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
+            raise Exception
+        
+        p1 = arbutils.thegraph_request(api_key, 
+                                    address1,
+                                    new_date=None, 
+                                    old_date=None, 
+                                    data_path=None, 
+                                    checkpoint_file=None)
+        if (p1 is None) or (type(p1)==str):
+            st.error("Failed to fetch Pool 1 data from Etherscan. Please check your API key and try again.")
+            raise Exception
+
+        merged_pools = arbutils.merge_pool_data_v2(p0, txn_rate0, p1, txn_rate1)
+    elif method == 'thegraph_analysis':
+        # Create timestamps based on the latest timestamp...for inference
+        new_date = datetime.now(pytz.UTC)
+        old_date = new_date - timedelta(hours=36)
+
+        p0 = arbutils.thegraph_request(api_key, 
+                                    address0,
+                                    new_date=new_date, 
+                                    old_date=old_date, 
+                                    data_path=None, 
+                                    checkpoint_file=None)
+        if (p0 is None) or (type(p0)==str):
+            st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
+            raise Exception
+        
+        p1 = arbutils.thegraph_request(api_key, 
+                                    address1,
+                                    new_date=new_date, 
+                                    old_date=old_date, 
+                                    data_path=None, 
+                                    checkpoint_file=None)
+        if (p1 is None) or (type(p1)==str):
+            st.error("Failed to fetch Pool 1 data from Etherscan. Please check your API key and try again.")
+            raise Exception
+
+        merged_pools = arbutils.merge_pool_data_v2(p0, txn_rate0, p1, txn_rate1)
+
+
     elif method == 'file':
         raise NotImplementedError("fetch_data: From file not implemented.")
     else:
@@ -302,12 +344,13 @@ pool0_txn_fee = float(st.sidebar.selectbox(label="Pool 0 Transaction Fee (${T_0}
 pool1_address = st.sidebar.text_input("Pool 1 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
 pool1_txn_fee = float(st.sidebar.selectbox(label="Pool 1 Transaction Fee (${T_1}$)",options=[0.01, 0.003,0.0005,0.0001],index=1)) #select 0.003 by default.
 
-fetch_strategy = st.sidebar.selectbox(label="Advanced Data Pull Setting (see source): ",options=["etherscan_legacy", "etherscan"],index=1) 
+fetch_strategy = st.sidebar.selectbox(label="Advanced Data Pull Setting (see source): ",options=["etherscan_legacy", "etherscan","thegraph"],index=2) 
 
 if fetch_strategy == 'etherscan_legacy':
     # Fetch the API key from environment variables
     API_KEY = os.getenv("ETHERSCAN_API_KEY")
     inference_fetch_strategy = 'etherscan_legacy'
+    analysis_fetch_strategy = 'etherscan_legacy'
 
 elif fetch_strategy == 'etherscan':
     # Fetch the API key from environment variables
@@ -315,8 +358,13 @@ elif fetch_strategy == 'etherscan':
     inference_fetch_strategy = 'etherscan'
     # work around because the fetch operations take so long
     # just use the old method for now.
-    fetch_strategy = 'etherscan_legacy'
+    analysis_fetch_strategy = 'etherscan_legacy'
 
+elif fetch_strategy == 'thegraph':
+    # Fetch the API key from environment variables
+    API_KEY = os.getenv("GRAPH_API_KEY")
+    inference_fetch_strategy = 'thegraph'
+    analysis_fetch_strategy = 'thegraph_analysis'
 else:
     print(f"WARNING: data pull strategy does not support {fetch_strategy}")
 
@@ -335,6 +383,15 @@ st.write(
 )
 
 if st.button("Run Recommender"):
+    
+    # ##########################################################################
+    #
+    #  Section 1: Recommended investment based on latest transactions.
+    #
+    # ##########################################################################
+    st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
+
+
     ####################################################
     # Run Inference Upfront
     ####################################################
@@ -422,20 +479,22 @@ if st.button("Run Recommender"):
     else:
         st.write(f"Last Data point received from query was at {df_min['time'].iloc[-1]}\nData queried is greater than {forecast_window_minutes} minute(s) old, unable to provide minimum amount to invest")
 
-    # Build Minimum Investment Breakout Table
-    st.subheader('Minimum Investment Calculation Breakout')
-    last_sample_ds = both_pools.iloc[-1]
-    last_sample_ds_pred = df_min.iloc[-1]
+    if inference_fetch_strategy != 'etherscan_legacy':
 
-    table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, forecast_window_minutes,pool0_txn_fee, pool1_txn_fee)
+        # Build Minimum Investment Breakout Table
+        st.subheader('Minimum Investment Calculation Breakout')
+        last_sample_ds = both_pools.iloc[-1]
+        last_sample_ds_pred = df_min.iloc[-1]
 
-    st.table(table_df)
+        table_df = create_min_investment_breakout(last_sample_ds, last_sample_ds_pred, forecast_window_minutes,pool0_txn_fee, pool1_txn_fee)
+
+        st.table(table_df)
 
     st.subheader("Analysis on the past transactions")
     st.write("look at model performance on past transactions.  Select a budget in sidebar to provide some intuition of return from past transactions.  Click Run to begin.")
 
 
-    with st.spinner("Fetching and processing data..."):
+    with st.spinner("Fetching and processing data for analysis..."):
         #
         # fetch data, preprocess, load model, perform inference 
         #          
@@ -445,7 +504,7 @@ if st.button("Run Recommender"):
                                             pool0_txn_fee, 
                                             pool1_address, 
                                             pool1_txn_fee, 
-                                            method=fetch_strategy)
+                                            method=analysis_fetch_strategy)
 
         # percent_change Preprocessing for model prediction
         X_pct_test, y_pct_test = percent_change_preprocessing(both_pools, model_params, objective='test')
@@ -511,22 +570,7 @@ if st.button("Run Recommender"):
                                     pool1_txn_fee)
 
         experiment_duration = df_final['time'].iloc[-1] - df_final['time'].iloc[0]
-        avg_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].mean()
-        median_positive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]['min_amount_to_invest_prediction'].median()
-
-        #avg_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-        #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
-        #med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-        #                    & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
-
         number_of_simulated_swaps = df_final.shape[0]
-
-        # ##########################################################################
-        #
-        #  Section 3: Recommended investment based on latest transactions.
-        #
-        # ##########################################################################
-        st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
 
         # ##########################################################################
         #
@@ -536,22 +580,7 @@ if st.button("Run Recommender"):
         st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
 
         st.write(f"Number of Transactions: {number_of_simulated_swaps}")
-        st.write(f"Average Recommended Minimum Investment: ${avg_positive_min_investment:.2f}")
-        st.write(f"Median Recommended Minimum Investment: ${median_positive_min_investment:.2f}")
-        
-        df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
-                            & (df_final['min_amount_to_invest_prediction'] < threshold)]
-        
-        df_gain = df_valid_txns[(df_valid_txns['Profit'] > 0)]
-
-        st.write(f"Percent of All Transactions with Detected Arbitrage Opportunites: {df_valid_txns.shape[0]/df_final.shape[0]*100:.1f}%")
-        st.write(f"Percent of Transactions with Detected Arbitrage Opportunites that the models predict a Return: {df_gain.shape[0]/df_valid_txns.shape[0]*100:.1f}%")
-        
-        #st.write("*Return / Profit is defined as the the hypothetical return from the actual percent_change and actual fees from past transactions 
-        #            using three new inputs: (1) the initial investment 'budget' provided by the user above, (2) the calculation for minimum investment 
-        #            that indicates if percent_change is large enough to perform arbitrage to overcome fees, (3) the decision by the model on which 
-        #            pool to use which impacts performance.*
-        #            ")
+ 
 
         if df_final[df_final['min_amount_to_invest_prediction']>0].shape[0] != 0:
 
@@ -562,8 +591,6 @@ if st.button("Run Recommender"):
                                 & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].mean()
             med_profit = df_final[(df_final['min_amount_to_invest_prediction'] > 0) 
                                 & (df_final['min_amount_to_invest_prediction'] < threshold)]['Profit'].median()
-
-
 
             df_valid_txns = df_final[(df_final['min_amount_to_invest_prediction'] > 0)]
             
@@ -597,8 +624,9 @@ if st.button("Run Recommender"):
             #
             # ##########################################################################
             fig2, axs2 = plt.subplots(2, 1, figsize=(14, 10))
+            postive_min_investment = df_final[df_final['min_amount_to_invest_prediction']>0]
 
-            axs2[0].scatter(df_final['time'], df_final['min_amount_to_invest_prediction'], marker='o')
+            axs2[0].scatter(postive_min_investment['time'], postive_min_investment['min_amount_to_invest_prediction'], marker='o')
             axs2[0].set_xlabel('time')
             axs2[0].set_ylabel('Recommended Minimum Amount to Invest')
             max_ylim = df_final['min_amount_to_invest_prediction'].max()
@@ -671,7 +699,7 @@ if st.button("Run Recommender"):
         st.write(f"Root Mean Squared Error: {y_gas_rmse:.4f}")
         st.write(f"R² Score: {y_gas_r2:.4f}")
 
-        if fetch_strategy != 'etherscan_legacy':
+        if analysis_fetch_strategy != 'etherscan_legacy':
             # Price Plots
             st.subheader(f'Pool Price Data')
             fig3, axs3 = plt.subplots(2, 1, figsize=(14, 10))
@@ -681,7 +709,7 @@ if st.button("Run Recommender"):
             axs3[0].scatter(both_pools['time'],both_pools['p1.eth_price_usd'], marker='x')
             axs3[0].set_title('Token Price for Pool 0 / Pool 1')
             axs3[0].legend(['Pool 0','Pool 1'])
-            axs3[0].set_yscale('log')
+            #axs3[0].set_yscale('log')
             axs3[0].set_xlabel('time')
             axs3[0].set_ylabel('USD per Eth (log scale)')
 
@@ -700,19 +728,23 @@ if st.button("Run Recommender"):
 
             # Gas Price Plots
             st.subheader(f'Gas Price Data')
-            fig4, axs4 = plt.subplots(1, 1, figsize=(14, 10))
-            axs4.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-            axs4.xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
-            axs4.scatter(both_pools['time'],both_pools['p0.gas_fees_usd'], marker='o')
-            axs4.scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
-            axs4.set_title('Gas Price for Pool 0 / Pool 1')
-            axs4.legend(['Pool 0','Pool 1'])
-            axs4.set_yscale('log')
-            axs4.set_xlabel('time')
-            axs4.set_ylabel('Gas prices in USD (log scale)')
+            fig4, axs4 = plt.subplots(2, 1, figsize=(14, 10))
+            axs4[0].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            axs4[0].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+            axs4[0].scatter(both_pools['time'],both_pools['p0.gas_fees_usd'], marker='o')
+            axs4[0].scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
+            axs4[0].set_title('Gas Price for Pool 0 / Pool 1')
+            axs4[0].legend(['Pool 0','Pool 1'])
+            #axs4.set_yscale('log')
+            axs4[0].set_xlabel('time')
+            axs4[0].set_ylabel('Gas prices in USD (log scale)')
+
+            axs4[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            axs4[1].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
+            axs4[1].scatter(both_pools_trunc['time'],both_pools_trunc['p0.gas_fees_usd'], marker='o')
+            axs4[1].scatter(both_pools_trunc['time'],both_pools_trunc['p1.gas_fees_usd'], marker='x')
+            axs4[1].set_title('Zoomed in Gas Price for Pool 0 / Pool 1')
+            axs4[1].legend(['Pool 0','Pool 1'])
+            axs4[1].set_xlabel('time')
+            axs4[1].set_ylabel('ETH?')
             st.pyplot(fig4)
-
-        
-        
-
-

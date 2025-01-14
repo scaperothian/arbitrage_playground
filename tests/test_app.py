@@ -3,10 +3,11 @@ import os
 import unittest
 import pandas as pd
 import numpy as np
+import datetime
+import pytz
+import shutil
 
-from src.arbutils import load_model, LGBM_Preprocessing, XGB_preprocessing, calculate_min_investment
-from src.etherscanutils import etherscan_request, merge_pool_data
-from src.alchemyutils import alchemy_request, merge_pool_data_v2
+import src.arbutils as arbutils
 
 from sklearn.metrics import root_mean_squared_error, r2_score
 
@@ -19,18 +20,128 @@ pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
 class TestAppMethods(unittest.TestCase):
     
-    def test_alchemy_request(self):
-                
-        # Add environmental variable ALCHEMY_API_KEY
-        ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
-        ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
+    def test_thegraph_request_inference(self):
+        #
+        # Fetch the data and check the columns....
+        # Note: this method assumes the pools are WETH/USDC pair.
+        #
+        GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
 
-        df_results = alchemy_request(ALCHEMY_URL, pool_address=pool0_address, blocks_to_look_back=40, latest_block=21582391)
-        valid_columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
-                    'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
-                    'block_number', 'gas_price', 'gas_used', 'sender', 'recipient']
+        df_results = arbutils.thegraph_request(GRAPH_API_KEY, 
+                                      pool_address=pool0_address,
+                                      new_date=None, 
+                                      old_date=None, 
+                                      data_path=None, 
+                                      checkpoint_file=None)
+
+        valid_columns = ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
+                'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
+                'liquidity']
+        
+        print(df_results.dtypes)
+
+        # Expected column types
+        expected_dtypes = {
+            'transactionHash': 'object',
+            'datetime': 'datetime64[ns, UTC]',
+            'timeStamp': 'int64',
+            'sqrtPriceX96': 'float64',
+            'blockNumber': 'int32',
+            'gasPrice': 'float64',
+            'gasUsed': 'float64',
+            'tick': 'float64',
+            'amount0': 'float64',
+            'amount1': 'float64',
+            'liquidity': 'float64',
+        }
+
+        # Validate column data types
+        for col, expected_dtype in expected_dtypes.items():
+            with self.subTest(col=col):
+                self.assertEqual(df_results[col].dtype, expected_dtype, f"Column {col} has incorrect dtype")
+        
 
 
+        actual_columns = list(df_results.columns)
+        
+        self.assertEqual(actual_columns, valid_columns)
+
+    def test_thegraph_request_training(self):
+        #
+        # Fetch the data and check the columns....
+        # Note: this method assumes the pools are WETH/USDC pair.
+        #
+        GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+        # Creates datetime objects.  
+        #                              YYYY  MM  DD  HH  MM  SS
+        old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
+        new_date = datetime.datetime(*(2025,  1, 14,  0,  2,  0), tzinfo=pytz.UTC)
+        
+        data_path = f'data/{pool0_address}'
+        checkpoint_file = 'checkpoint.json'
+
+        # Delete the file if it exists
+        if os.path.isfile(checkpoint_file):
+            try:
+                os.remove(checkpoint_file)
+                print(f"Deleted file: {checkpoint_file}")
+            except Exception as e:
+                print(f"Error deleting file: {checkpoint_file}. Error: {e}")
+
+        # Delete the directory if it exists
+        if os.path.isdir(data_path):
+            try:
+                shutil.rmtree(data_path)
+                print(f"Deleted directory: {data_path}")
+            except Exception as e:
+                print(f"Error deleting directory: {data_path}. Error: {e}")
+
+
+        df_results = arbutils.thegraph_request(GRAPH_API_KEY, 
+                                      pool_address=pool0_address,
+                                      new_date=new_date, 
+                                      old_date=old_date, 
+                                      data_path=data_path, 
+                                      checkpoint_file=checkpoint_file)
+        
+
+        self.assertEqual(type('str'), type(df_results))
+
+    def test_etherscan_request_v2(self):
+        #
+        # Fetch the data and check the columns....
+        # Note: this method assumes the pools are WETH/USDC pair.
+        #
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+        df_results = arbutils.etherscan_request_v2(ETHERSCAN_API_KEY, 
+                                      pool_address=pool0_address)
+
+        valid_columns = ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
+                'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
+                'liquidity']
+        
+        print(df_results.dtypes)
+
+        # Expected column types
+        expected_dtypes = {
+            'transactionHash': 'object',
+            'datetime': 'datetime64[ns, UTC]',
+            'timeStamp': 'int64',
+            'sqrtPriceX96': 'float64',
+            'blockNumber': 'int32',
+            'gasPrice': 'float64',
+            'gasUsed': 'float64',
+            'tick': 'float64',
+            'amount0': 'float64',
+            'amount1': 'float64',
+            'liquidity': 'float64',
+        }
+
+        # Validate column data types
+        for col, expected_dtype in expected_dtypes.items():
+            with self.subTest(col=col):
+                self.assertEqual(df_results[col].dtype, expected_dtype, f"Column {col} has incorrect dtype")
+        
         actual_columns = list(df_results.columns)
         
         self.assertEqual(actual_columns, valid_columns)
@@ -42,7 +153,7 @@ class TestAppMethods(unittest.TestCase):
         #
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-        df_results = etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
+        df_results = arbutils.etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
         valid_columns = ['blockNumber', 'timeStamp', 'hash', 'from', 'to', 'WETH_value',
        'USDC_value', 'tokenName_WETH', 'tokenName_USDC', 'gas', 'gasPrice',
        'gasUsed', 'cumulativeGasUsed', 'confirmations']
@@ -58,10 +169,10 @@ class TestAppMethods(unittest.TestCase):
         # 
         # Check to make sure we can fetch the models
         #
-        m0 = load_model(price_model_name)
+        m0 = arbutils.load_model(price_model_name)
         self.assertNotEqual(None, m0)
 
-        m1 = load_model(gasfee_model_name)
+        m1 = arbutils.load_model(gasfee_model_name)
         self.assertNotEqual(None, m1)
 
     def test_merge_pool_data(self):
@@ -131,7 +242,7 @@ class TestAppMethods(unittest.TestCase):
        'p1.weth_to_usd_ratio', 'p1.gas_fees_usd', 'percent_change',
        'total_gas_fees_usd']
 
-        df_results = merge_pool_data(p0,p1)
+        df_results = arbutils.merge_pool_data(p0,p1)
         actual_columns = list(df_results.columns)
 
         self.assertEqual(actual_columns, valid_output_columns)
@@ -199,7 +310,7 @@ class TestAppMethods(unittest.TestCase):
                 'total_gas_fees_usd', 'total_transaction_rate',
                 'total_transaction_fees_used', 'total_fees_usd', 'swap_go_nogo']
 
-        df_results = merge_pool_data_v2(p0,pool0_tx_fee,p1,pool1_tx_fee)
+        df_results = arbutils.merge_pool_data_v2(p0,pool0_tx_fee,p1,pool1_tx_fee)
         actual_columns = list(df_results.columns)
 
         self.assertEqual(actual_columns, valid_output_columns)
@@ -238,7 +349,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, model_params, objective='inference')
+        lgbm_results = arbutils.LGBM_Preprocessing(merged_pool_data_df, model_params, objective='inference')
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),1)
@@ -278,7 +389,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, model_params, objective='test')
+        lgbm_results = arbutils.LGBM_Preprocessing(merged_pool_data_df, model_params, objective='test')
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),2)
@@ -318,7 +429,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         # LGBM Preprocessing
-        lgbm_results = LGBM_Preprocessing(merged_pool_data_df, model_params, objective='train')
+        lgbm_results = arbutils.LGBM_Preprocessing(merged_pool_data_df, model_params, objective='train')
 
         # Check for 4 return objects.
         self.assertEqual(len(lgbm_results),4)
@@ -361,7 +472,7 @@ class TestAppMethods(unittest.TestCase):
         merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(merged_pool_data_df, model_params, objective='train')
+        xgb_results = arbutils.XGB_preprocessing(merged_pool_data_df, model_params, objective='train')
 
         # For training, there are four outputs.
         self.assertEqual(len(xgb_results),4)
@@ -398,7 +509,7 @@ class TestAppMethods(unittest.TestCase):
         merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(merged_pool_data_df, model_params, objective='test')
+        xgb_results = arbutils.XGB_preprocessing(merged_pool_data_df, model_params, objective='test')
 
         # For training, there are four outputs.
         self.assertEqual(len(xgb_results),2)
@@ -435,7 +546,7 @@ class TestAppMethods(unittest.TestCase):
         merged_pool_data_df = pd.DataFrame(data)
 
         # XGB Preprocessing
-        xgb_results = XGB_preprocessing(merged_pool_data_df, model_params, objective='inference')
+        xgb_results = arbutils.XGB_preprocessing(merged_pool_data_df, model_params, objective='inference')
 
         # For training, there are four outputs.
         self.assertEqual(len(xgb_results),1)
@@ -464,7 +575,7 @@ class TestAppMethods(unittest.TestCase):
         }
         x_pct_test = pd.DataFrame(data)
 
-        model = load_model(price_model_name)
+        model = arbutils.load_model(price_model_name)
 
         y_pct_pred = model.predict(x_pct_test)
 
@@ -511,7 +622,7 @@ class TestAppMethods(unittest.TestCase):
         }
         x_pct_test = pd.DataFrame(data)
 
-        model = load_model(gas_fees_model_name)
+        model = arbutils.load_model(gas_fees_model_name)
 
         y_pct_pred = model.predict(x_pct_test)
 
@@ -551,7 +662,7 @@ class TestAppMethods(unittest.TestCase):
             POOL1_TXN_FEE_COL_NAME:[0.3]
         }
 
-        df = calculate_min_investment(pd.DataFrame(test_dict),
+        df = arbutils.calculate_min_investment(pd.DataFrame(test_dict),
                                         POOL0_TXN_FEE_COL_NAME,
                                         POOL1_TXN_FEE_COL_NAME,
                                         GAS_FEES_COL_NAME,
@@ -594,7 +705,7 @@ class TestAppMethods(unittest.TestCase):
             POOL1_TXN_FEE_COL_NAME:[0.1]
         }
 
-        df = calculate_min_investment(pd.DataFrame(test_dict),
+        df = arbutils.calculate_min_investment(pd.DataFrame(test_dict),
                                         POOL0_TXN_FEE_COL_NAME,
                                         POOL1_TXN_FEE_COL_NAME,
                                         GAS_FEES_COL_NAME,
@@ -638,7 +749,7 @@ class TestAppMethods(unittest.TestCase):
             POOL1_TXN_FEE_COL_NAME:[0.1]
         }
 
-        df = calculate_min_investment(pd.DataFrame(test_dict),
+        df = arbutils.calculate_min_investment(pd.DataFrame(test_dict),
                                         POOL0_TXN_FEE_COL_NAME,
                                         POOL1_TXN_FEE_COL_NAME,
                                         GAS_FEES_COL_NAME,
@@ -680,7 +791,7 @@ class TestAppMethods(unittest.TestCase):
             POOL1_TXN_FEE_COL_NAME:[0.1]
         }
 
-        df = calculate_min_investment(pd.DataFrame(test_dict),
+        df = arbutils.calculate_min_investment(pd.DataFrame(test_dict),
                                         POOL0_TXN_FEE_COL_NAME,
                                         POOL1_TXN_FEE_COL_NAME,
                                         GAS_FEES_COL_NAME,
