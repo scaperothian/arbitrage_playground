@@ -85,7 +85,10 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
         merged_pools = arbutils.merge_pool_data(p0, p1)
     
     elif method == 'thegraph':
-        p0 = arbutils.thegraph_request(api_key, 
+        # work around for gasUsed issue...
+        etherscan_api_key = os.getenv("ETHERSCAN_API_KEY")
+        p0 = arbutils.thegraph_request(api_key,
+                                    etherscan_api_key,
                                     address0,
                                     new_date=None, 
                                     old_date=None, 
@@ -96,6 +99,7 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
             raise Exception
         
         p1 = arbutils.thegraph_request(api_key, 
+                                    etherscan_api_key,                                    
                                     address1,
                                     new_date=None, 
                                     old_date=None, 
@@ -110,8 +114,10 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
         # Create timestamps based on the latest timestamp...for inference
         new_date = datetime.now(pytz.UTC)
         old_date = new_date - timedelta(hours=36)
+        etherscan_api_key = os.getenv("ETHERSCAN_API_KEY")
 
         p0 = arbutils.thegraph_request(api_key, 
+                                    etherscan_api_key,           
                                     address0,
                                     new_date=new_date, 
                                     old_date=old_date, 
@@ -122,6 +128,7 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
             raise Exception
         
         p1 = arbutils.thegraph_request(api_key, 
+                                    etherscan_api_key,           
                                     address1,
                                     new_date=new_date, 
                                     old_date=old_date, 
@@ -389,8 +396,7 @@ if st.button("Run Recommender"):
     #  Section 1: Recommended investment based on latest transactions.
     #
     # ##########################################################################
-    st.subheader(f'Recommended Minimum Investment Prediction ({forecast_window_minutes} minute forecast)')
-
+    st.subheader(f'Recommended Minimum Investment ({forecast_window_minutes} minute forecast)')
 
     ####################################################
     # Run Inference Upfront
@@ -709,9 +715,9 @@ if st.button("Run Recommender"):
             axs3[0].scatter(both_pools['time'],both_pools['p1.eth_price_usd'], marker='x')
             axs3[0].set_title('Token Price for Pool 0 / Pool 1')
             axs3[0].legend(['Pool 0','Pool 1'])
-            #axs3[0].set_yscale('log')
+            axs3[0].set_yscale('log')
             axs3[0].set_xlabel('time')
-            axs3[0].set_ylabel('USD per Eth (log scale)')
+            axs3[0].set_ylabel('USDC/WETH (log scale)')
 
 
             both_pools_trunc = both_pools.iloc[-50:]
@@ -722,7 +728,7 @@ if st.button("Run Recommender"):
             axs3[1].set_title('Zoomed in Token Price for Pool 0 / Pool 1')
             axs3[1].legend(['Pool 0','Pool 1'])
             axs3[1].set_xlabel('time')
-            axs3[1].set_ylabel('USD per Eth (log scale)')
+            axs3[1].set_ylabel('USDC/WETH (log scale)')
             st.pyplot(fig3)
 
 
@@ -735,16 +741,17 @@ if st.button("Run Recommender"):
             axs4[0].scatter(both_pools['time'],both_pools['p1.gas_fees_usd'], marker='x')
             axs4[0].set_title('Gas Price for Pool 0 / Pool 1')
             axs4[0].legend(['Pool 0','Pool 1'])
-            #axs4.set_yscale('log')
+            axs4[0].set_yscale('log')
             axs4[0].set_xlabel('time')
-            axs4[0].set_ylabel('Gas prices in USD (log scale)')
+            axs4[0].set_ylabel('USDC/WETH (log scale)')
 
             axs4[1].xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
             axs4[1].xaxis.set_major_locator(mdates.AutoDateLocator())  # Automatically adjusts tick frequency
             axs4[1].scatter(both_pools_trunc['time'],both_pools_trunc['p0.gas_fees_usd'], marker='o')
             axs4[1].scatter(both_pools_trunc['time'],both_pools_trunc['p1.gas_fees_usd'], marker='x')
             axs4[1].set_title('Zoomed in Gas Price for Pool 0 / Pool 1')
-            axs4[1].legend(['Pool 0','Pool 1'])
+            axs4[1].legend(['Pool 0','Pool 1'])            
+            axs4[1].set_yscale('log')
             axs4[1].set_xlabel('time')
-            axs4[1].set_ylabel('ETH?')
+            axs4[1].set_ylabel('USDC/WETH (log scale)')
             st.pyplot(fig4)

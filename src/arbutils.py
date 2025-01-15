@@ -580,7 +580,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
 
 
 
-def thegraph_request(api_key, pool_address, new_date=None, old_date=None, data_path=None, checkpoint_file='checkpoint.json'):
+def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, new_date=None, old_date=None, data_path=None, checkpoint_file='checkpoint.json'):
     """
     assume that data_path == None means that we are not saving data...
 
@@ -594,7 +594,77 @@ def thegraph_request(api_key, pool_address, new_date=None, old_date=None, data_p
         new_date = datetime.datetime.now(pytz.UTC)
         old_date = new_date - datetime.timedelta(hours=1)
 
-    def fetch_data_with_pagination(api_key, pool_address, new_date, old_date, data_path=None, checkpoint_file='checkpoint.json'):
+    def fetch_tokentx_data(etherscan_api_key, pool_address, start_block=0, end_block=99999999):
+
+        base_url = 'https://api.etherscan.io/api'
+
+        params = {
+            'module': 'account',
+            'action': 'tokentx',
+            'address': pool_address,
+            'startblock': start_block,
+            'endblock': end_block,
+            'sort': 'desc',
+            'apikey': etherscan_api_key
+        }
+        
+        
+        response = requests.get(base_url, params=params)
+        if response.status_code != 200:
+            #st.error(f"API request failed with status code {response.status_code}")
+            raise Exception(f"API request failed with status code {response.status_code}")
+        
+        data = response.json()
+        if data['status'] != '1':
+            #st.error(f"API returned an error: {data['result']}")
+            raise Exception(f"API returned an error: {data['result']}")
+        
+        df = pd.DataFrame(data['result'])
+        
+        expected_columns = ['hash', 'blockNumber', 'timeStamp', 'from', 'to', 'gas', 'gasPrice', 'gasUsed', 'cumulativeGasUsed', 'confirmations', 'tokenSymbol', 'value', 'tokenName']
+        
+        for col in expected_columns:
+            if col not in df.columns:
+                raise Exception(f"Expected column '{col}' is missing from the response")
+        
+        df.sort_values(by='timeStamp')
+        
+        consolidated_data = {}
+
+        for index, row in df.iterrows():
+            tx_hash = row['hash']
+            
+            if tx_hash not in consolidated_data:
+                consolidated_data[tx_hash] = {
+                    'blockNumber': np.int32(row['blockNumber']),
+                    'timeStamp': int(row['timeStamp']),
+                    'transactionHash': tx_hash,
+                    'from': row['from'],
+                    'to': row['to'],
+                    'WETH_value': 0,
+                    'USDC_value': 0,
+                    'tokenName_WETH': '',
+                    'tokenName_USDC': '',
+                    'gas': float(row['gas']),
+                    'gasPrice': float(row['gasPrice']),
+                    'gasUsed': float(row['gasUsed']),
+                    'cumulativeGasUsed': float(row['cumulativeGasUsed']),
+                    'confirmations': row['confirmations']
+                }
+            
+            if row['tokenSymbol'] == 'WETH':
+                consolidated_data[tx_hash]['WETH_value'] = float(row['value'])
+                consolidated_data[tx_hash]['tokenName_WETH'] = row['tokenName']
+            elif row['tokenSymbol'] == 'USDC':
+                consolidated_data[tx_hash]['USDC_value'] = float(row['value'])
+                consolidated_data[tx_hash]['tokenName_USDC'] = row['tokenName']
+
+        final_df = pd.DataFrame.from_dict(consolidated_data, orient='index').reset_index(drop=True)
+
+        return final_df.sort_values(by='timeStamp')
+
+
+    def fetch_data_with_pagination(thegraph_api_key, pool_address, new_date, old_date, data_path=None, checkpoint_file='checkpoint.json'):
 
         query_template = """
         {
@@ -663,7 +733,7 @@ def thegraph_request(api_key, pool_address, new_date=None, old_date=None, data_p
                 
                 query = query_template % (pool_address, oldest_id)
                 response = requests.post(
-                    f'https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV',
+                    f'https://gateway.thegraph.com/api/{thegraph_api_key}/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV',
                     json={'query': query}
                 )
                 
@@ -718,7 +788,7 @@ def thegraph_request(api_key, pool_address, new_date=None, old_date=None, data_p
         os.makedirs(f'{data_path}/{pool_address}/', exist_ok=True)
     
     swaps_data = fetch_data_with_pagination(
-        api_key=api_key,
+        thegraph_api_key=thegraph_api_key,
         pool_address=pool_address,
         new_date=new_date,
         old_date=old_date,
@@ -754,6 +824,18 @@ def thegraph_request(api_key, pool_address, new_date=None, old_date=None, data_p
     swaps_df['amount0'] = swaps_df['amount0'].astype('float')
     swaps_df['amount1'] = swaps_df['amount1'].astype('float')
     swaps_df['liquidity'] = -1.0  #not implemented
+
+
+    if swaps_df['gasUsed'].sum()==0:
+        #########################################
+        #    If the gasUsed is all zero, then 
+        #    we need to get the gasUsed from the 
+        #    token transfers...
+        #########################################
+        startblock = swaps_df['blockNumber'].iloc[0]
+        endblock = swaps_df['blockNumber'].iloc[-1]
+        swaps_tokentx_df = fetch_tokentx_data(etherscan_api_key, pool_address, start_block=startblock, end_block=endblock)
+        swaps_df = pd.merge(swaps_df.drop(labels=['gasUsed'],axis=1), swaps_tokentx_df[['timeStamp','blockNumber','gasUsed']], on=['timeStamp','blockNumber'], how='left')
 
     if data_path: 
         swaps_df.to_csv(f'{data_path}/{pool_address}/pool_id_{pool_address}_swap_final.csv')
