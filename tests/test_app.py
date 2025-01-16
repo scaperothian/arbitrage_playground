@@ -20,19 +20,103 @@ pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
 class TestAppMethods(unittest.TestCase):
     
+    def test_thegraph_request_validation(self):
+        GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+
+        # Creates datetime objects.  
+        #                              YYYY  MM  DD  HH  MM  SS
+        old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
+        new_date = datetime.datetime(*(2025,  1, 15,  0,  0,  0), tzinfo=pytz.UTC)
+
+
+        df0 = arbutils.thegraph_request(GRAPH_API_KEY,
+                                        ETHERSCAN_API_KEY, 
+                                        pool_address=pool0_address,
+                                        old_date=old_date,
+                                        new_date=new_date,
+                                        batch_size=10)
+        
+        df1 = arbutils.thegraph_request(GRAPH_API_KEY,
+                                        ETHERSCAN_API_KEY, 
+                                        pool_address=pool0_address,
+                                        old_date=old_date,
+                                        new_date=new_date,
+                                        batch_size=100)
+        
+        df2 = arbutils.thegraph_request(GRAPH_API_KEY,
+                                        ETHERSCAN_API_KEY, 
+                                        pool_address=pool0_address,
+                                        old_date=old_date,
+                                        new_date=new_date,
+                                        batch_size=1000)
+        print(df0.shape, df1.shape, df2.shape)
+        
+        self.assertEqual(df0.shape,df1.shape,df2.shape)
+
     def test_thegraph_request_inference(self):
         #
         # Fetch the data and check the columns....
         # Note: this method assumes the pools are WETH/USDC pair.
         #
         GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-        df_results = arbutils.thegraph_request(GRAPH_API_KEY, 
-                                      pool_address=pool0_address,
-                                      new_date=None, 
-                                      old_date=None, 
-                                      data_path=None, 
-                                      checkpoint_file=None)
+        df_results = arbutils.thegraph_request(GRAPH_API_KEY,
+                                               ETHERSCAN_API_KEY, 
+                                      pool_address=pool0_address)
+
+        valid_columns = ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
+                'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
+                'liquidity']
+        
+        print(df_results.dtypes)
+
+        # Expected column types
+        expected_dtypes = {
+            'transactionHash': 'object',
+            'datetime': 'datetime64[ns, UTC]',
+            'timeStamp': 'int64',
+            'sqrtPriceX96': 'float64',
+            'blockNumber': 'int32',
+            'gasPrice': 'float64',
+            'gasUsed': 'float64',
+            'tick': 'float64',
+            'amount0': 'float64',
+            'amount1': 'float64',
+            'liquidity': 'float64',
+        }
+
+        # Validate column data types
+        for col, expected_dtype in expected_dtypes.items():
+            with self.subTest(col=col):
+                self.assertEqual(df_results[col].dtype, expected_dtype, f"Column {col} has incorrect dtype")
+        
+
+
+        actual_columns = list(df_results.columns)
+        
+        self.assertEqual(actual_columns, valid_columns)
+
+    def test_thegraph_request_analysis(self):
+        #
+        # Fetch the data and check the columns....
+        # Note: this method assumes the pools are WETH/USDC pair.
+        #
+        GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+
+        # Creates datetime objects.  
+        #                              YYYY  MM  DD  HH  MM  SS
+        old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
+        new_date = datetime.datetime(*(2025,  1, 18,  0,  0,  0), tzinfo=pytz.UTC)
+
+        df_results = arbutils.thegraph_request(GRAPH_API_KEY,
+                                        ETHERSCAN_API_KEY, 
+                                        pool_address=pool0_address,
+                                        old_date=old_date,
+                                        new_date=new_date,
+                                        batch_size=1000)
 
         valid_columns = ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
                 'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
@@ -72,6 +156,9 @@ class TestAppMethods(unittest.TestCase):
         # Note: this method assumes the pools are WETH/USDC pair.
         #
         GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+
+
         # Creates datetime objects.  
         #                              YYYY  MM  DD  HH  MM  SS
         old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
@@ -98,6 +185,7 @@ class TestAppMethods(unittest.TestCase):
 
 
         df_results = arbutils.thegraph_request(GRAPH_API_KEY, 
+                                      ETHERSCAN_API_KEY,
                                       pool_address=pool0_address,
                                       new_date=new_date, 
                                       old_date=old_date, 

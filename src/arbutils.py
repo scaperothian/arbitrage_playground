@@ -16,7 +16,7 @@ from web3 import Web3
 
 from sklearn.model_selection import train_test_split
 
-def etherscan_request_v2(etherscan_api_key, pool_address):
+def etherscan_request_v2(etherscan_api_key, pool_address, max_samples=10):
     """
     Three big steps: 
     1. Get the latest timestamp for etherscan
@@ -37,7 +37,8 @@ def etherscan_request_v2(etherscan_api_key, pool_address):
     # make the model work (TODO: should be an input value)
     # for example, we need to support moving average and lags
     # from past data for model inference.
-    MAX_SAMPLES = 10
+    # set to 10 for inference.
+    MAX_SAMPLES = max_samples
 
     # Based on some empircal data, 60 minutes tends to give pretty
     # good results for getting at least one transaction for each
@@ -149,7 +150,7 @@ def etherscan_request_v2(etherscan_api_key, pool_address):
         response = requests.get(base_url, params=params)
         if response.status_code != 200:
             #st.error(f"API request failed with status code {response.status_code}")
-            raise Exception(f"API request failed with status code {response.status_code}")
+            raise Exception(f"API request failed with status code {response.status_code}: {response}")
         
         data = response.json()
         if data['status'] != '1':
@@ -263,9 +264,11 @@ def etherscan_request_v2(etherscan_api_key, pool_address):
         beginningtime = int(pool['timeStamp'].iloc[0])
         print(f"Successfully fetched {pool.shape[0]} swaps in the last {(endtime -beginningtime)/60:.2f} minutes.")
 
-        # truncate to MAX_SAMPLES to avoid decoding unnecessary transactions...
-        pool = pool.iloc[-1*MAX_SAMPLES:]
-    
+        # otherwise preserve the number of samples...
+        if MAX_SAMPLES is not None:
+            # truncate to MAX_SAMPLES to avoid decoding unnecessary transactions...
+            pool = pool.iloc[-1*MAX_SAMPLES:]
+        
     ##############################################################
     #
     #    3. Get block raw data with valid transactions 
@@ -580,7 +583,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
 
 
 
-def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, new_date=None, old_date=None, data_path=None, checkpoint_file='checkpoint.json'):
+def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date=None, new_date=None, data_path=None, checkpoint_file='checkpoint.json',batch_size=1000):
     """
     assume that data_path == None means that we are not saving data...
 
@@ -664,15 +667,16 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, new_date
         return final_df.sort_values(by='timeStamp')
 
 
-    def fetch_data_with_pagination(thegraph_api_key, pool_address, new_date, old_date, data_path=None, checkpoint_file='checkpoint.json'):
+    def fetch_data_with_pagination(thegraph_api_key, pool_address, old_date, new_date, data_path=None, checkpoint_file='checkpoint.json',batch_size=1000):
 
         query_template = """
         {
             swaps(
-                first: 1000,
+                first: %s,
                 where: {
                     pool: "%s",
-                    timestamp_gt: "%s"
+                    timestamp_gt: "%s",
+                    timestamp_lt: "%s"
                 },
                 orderBy: timestamp
             ) {
@@ -707,79 +711,104 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, new_date
             }
         }
         """
+        newest_id = int(new_date.timestamp())
+
         if data_path and os.path.exists(checkpoint_file):
             with open(checkpoint_file, 'r') as f:
                 checkpoint = json.load(f)
-            oldest_id = checkpoint['last_timestamp']
+            oldest_id = int(checkpoint['last_timestamp'])
             batch_num = checkpoint['batch_num']
             all_data = checkpoint.get('accumulated_data', [])
         
         else:
-            oldest_id = str(int(old_date.timestamp()))
+            oldest_id = int(old_date.timestamp())
             batch_num = 0
             all_data = []
         
+        #
+        #  Discussion of loop:
+        #  The goal of the loop is to extract all relevant transactions into 
+        #  all_data list.  The bounds are oldest_id to newest_id.  These are 
+        #  epoch timestamps (i.e. seconds based).  When a batch of 'batch_size'
+        #  or less transactions is returned from the response, the oldest_id
+        #  is changed in two ways (1) its updated to the newest timestamp in the
+        #  "new_data" batch of responses and (2) the timestamp found is decremented
+        #  by 1 second for a specific race condition (see next paragraph).  The oldest_id
+        #  is thus approaching newest_id until oldest_id == newest_id.  The program breaks 
+        #  at this point.
+        #
+        #  Race condition: it is observed that there are multiple transactions that occur
+        #  within the same timestamp (i.e. multiple transaction can occur in the same block
+        #  from within the same pool).  Because of this, when we use "first: 1000" in the GraphQL
+        #  if there is a case where multiple transactions occur with the same timestamp and just
+        #  happens to occur at the end of the list of 1000, the transactions afterward may be 
+        #  excluded if care is not taken for this case in managing timestmaps.  The decrement by 1
+        #  is intended to pick up where the request left off assuming the last timestamp could have
+        #  had multiple transactions.  
+        #
+        while True:    
+            query = query_template % (batch_size, pool_address, oldest_id, newest_id)
 
-        newest_id = str(int(new_date.timestamp()))
-
-        fetches = []
-        
-        print(f"Starting from timestamp: {oldest_id}")
-        
-        while newest_id > oldest_id:
             try:
-                start = time.time()
-                print("query number", batch_num, oldest_id, newest_id)
-                
-                query = query_template % (pool_address, oldest_id)
                 response = requests.post(
                     f'https://gateway.thegraph.com/api/{thegraph_api_key}/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV',
                     json={'query': query}
-                )
-                
-                data = response.json()
-                if 'errors' in data:
-                    print("GraphQL query error:", data['errors'])
-                    break
-                    
-                new_data = data['data']['swaps'] if 'swaps' in data['data'] else []
-                batch_num += 1
-                
-                if not new_data:
-                    break
-                    
-                #print("new_data 0", new_data[0])
-                
-                # Save the batch immediately to CSV
-                batch_df = json_normalize(new_data)
-                batch_df['datetime'] = batch_df['timestamp'].apply(lambda x: datetime.datetime.fromtimestamp(int(x),tz=pytz.UTC))
-
-                # Update checkpoint
-                oldest_id = new_data[-1]['timestamp']
-
-                # add batch to all_data
-                all_data.extend(new_data)
-                
-                if data_path:
-
-                    batch_df.to_csv(f'{data_path}/{pool_address}/pool_id_{pool_address}_swap_batch_{batch_num}.csv')
-                    checkpoint = {
-                        'last_timestamp': oldest_id,
-                        'batch_num': batch_num
-                    }
-                    with open(checkpoint_file, 'w') as f:
-                        json.dump(checkpoint, f)
-                
-                end = time.time()
-                fetches.append(end-start)
-                print(f"Batch {batch_num}, Total swaps: {len(new_data)}, Avg Fetch Time: {np.mean(fetches):.1f}s")
-                
+                )  
             except Exception as e:
-                print(f"Error occurred: {e}")
-                print("Saving checkpoint and exiting...")
+                print(f"Post error occurred: {e}")
                 break
         
+            data = response.json()
+            if 'errors' in data:
+                print("GraphQL query error:", data['errors'])
+                break
+                
+            new_data = data['data']['swaps'] if 'swaps' in data['data'] else []
+            if not new_data:
+                print("No data found in the fetch...continuing?")
+                continue
+                                
+            # Save the batch immediately to CSV
+            batch_df = json_normalize(new_data)
+            batch_df['datetime'] = batch_df['timestamp'].apply(lambda x: datetime.datetime.fromtimestamp(int(x),tz=pytz.UTC))
+
+            # Update checkpoint
+            if (int(new_data[0]['timestamp']) - int(new_data[-1]['timestamp'])) != 0: 
+                oldest_id = int(new_data[-1]['timestamp'])-1
+            else:
+                #print("Timestamps are the same!")
+                # Exit Loop
+                break
+
+            # add batch to all_data
+            all_data.extend(new_data)
+            
+            print(f"{batch_num}: [{oldest_id}-{newest_id}]found {len(new_data)} swaps from {new_data[0]['timestamp']} to {new_data[-1]['timestamp']}")
+            batch_num += 1
+
+            if data_path:
+                batch_df.to_csv(f'{data_path}/{pool_address}/pool_id_{pool_address}_swap_batch_{batch_num}.csv')
+                checkpoint = {
+                    'last_timestamp': oldest_id,
+                    'batch_num': batch_num
+                }
+                with open(checkpoint_file, 'w') as f:
+                    json.dump(checkpoint, f)
+        
+        print(f"Found {len(all_data)} swaps from {all_data[0]['timestamp']} to {all_data[-1]['timestamp']}")
+
         return all_data
+    
+    def get_chunks(start_block_num, end_block_num):
+        chunks = []
+        while start_block_num < end_block_num:
+            s = start_block_num
+            e = start_block_num+2500
+            if e > end_block_num: 
+                e = end_block_num
+            start_block_num = e+1
+            chunks.append((s,e))
+        return chunks
     
     full_start = time.time()
     
@@ -790,10 +819,11 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, new_date
     swaps_data = fetch_data_with_pagination(
         thegraph_api_key=thegraph_api_key,
         pool_address=pool_address,
-        new_date=new_date,
         old_date=old_date,
+        new_date=new_date,
         data_path=data_path,
-        checkpoint_file=checkpoint_file
+        checkpoint_file=checkpoint_file,
+        batch_size=batch_size
     )
     
     #        valid_columns = ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
@@ -827,21 +857,42 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, new_date
 
 
     if swaps_df['gasUsed'].sum()==0:
+        print(f"Swaps Found (Prior to Merge, Prior to drop_duplicates): {swaps_df.shape}")
+        swaps_df = swaps_df.drop_duplicates()
         #########################################
         #    If the gasUsed is all zero, then 
         #    we need to get the gasUsed from the 
         #    token transfers...
         #########################################
-        startblock = swaps_df['blockNumber'].iloc[0]
-        endblock = swaps_df['blockNumber'].iloc[-1]
-        swaps_tokentx_df = fetch_tokentx_data(etherscan_api_key, pool_address, start_block=startblock, end_block=endblock)
-        swaps_df = pd.merge(swaps_df.drop(labels=['gasUsed'],axis=1), swaps_tokentx_df[['timeStamp','blockNumber','gasUsed']], on=['timeStamp','blockNumber'], how='left')
+        pool_startblock = swaps_df['blockNumber'].iloc[0]
+        pool_endblock = swaps_df['blockNumber'].iloc[-1]
+        
+
+        # must throttle the requests for tokentx.  it will give you 
+        # less than 5000 transactions regardless of what block range you 
+        # give it.  so we break it up into 2500 block chunks.
+        block_chunks = get_chunks(pool_startblock, pool_endblock)
+        swaps_tokentx_df = pd.DataFrame()
+        for startblock, endblock in block_chunks:
+            #throttle requests...
+            time.sleep(0.01)
+            swaps_tokentx_df = pd.concat([swaps_tokentx_df, fetch_tokentx_data(etherscan_api_key, 
+                                                                   pool_address, 
+                                                                   start_block=startblock, 
+                                                                   end_block=endblock)])
+
+        #swaps_tokentx_df = fetch_tokentx_data(etherscan_api_key, pool_address, start_block=startblock-1, end_block=endblock+1)
+        print(f"Swaps Found (Prior to Merge): {swaps_df.shape}")
+        print(f"Found {swaps_tokentx_df.shape[0]} Token Tx between {swaps_df['timeStamp'].iloc[0]} and {swaps_df['timeStamp'].iloc[-1]}")
+
+        swaps_df = pd.merge(swaps_df.drop(labels=['gasUsed'],axis=1), swaps_tokentx_df[['timeStamp','blockNumber','transactionHash','gasUsed']], on=['timeStamp','blockNumber','transactionHash'], how='left')
 
     if data_path: 
         swaps_df.to_csv(f'{data_path}/{pool_address}/pool_id_{pool_address}_swap_final.csv')
         full_end = time.time()
         return f'Time to run on {len(swaps_data)} swaps: {full_end-full_start}s'
     else:
+        print(f"Swaps Found (After Merge): {swaps_df.shape}")
         return swaps_df[['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
                 'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
                 'liquidity']]
