@@ -7,11 +7,47 @@ import pandas as pd
 from datetime import datetime, timezone
 from web3 import Web3
 
-# Add environmental variable ALCHEMY_API_KEY
-ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
-ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
+def alchemy_request(url, address, blocks_to_look_back=40, latest_block=0):
+   
+    #
+    # Look for Swap Events in the duration from "latest block" to "latest block - blocks_to_look_back"
+    #
+    # pool_df.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
+    #   'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
+    #   'block_number']
+    pool_df, npool_txs, _ = fetch_swap_pool(url, 
+                                            address, 
+                                            blocks_to_look_back, 
+                                            latest_block)
+    
+    print("")
+    if npool_txs == 0:
+        print("Pool: Did not find any transactions in the window specified.")
+        return None
+        
+    else:
+        print(f"Latest Block Timestamp: {pool_df['timestamp'].max()-pd.Timedelta(hours=4)}")
+        pool_total_minutes = (pool_df['timestamp'].max()-pool_df['timestamp'].min()).total_seconds() / 60
+        print(f"Duration of Pool Data (in minutes): {pool_total_minutes} minutes")
 
-w3 = Web3(Web3.HTTPProvider(ALCHEMY_URL))
+    #
+    # Get detailed block data from block numbers...
+    #
+    # pool_block_details.columns = ['timestamp', 'transaction_hash', 'block_number', 'gas_price',
+    #   'gas_used', 'sender', 'recipient']
+    pool_block_details = fetch_block_details(url, pool_df)
+
+    # merge 
+    pool_final = pool_df.merge(pool_block_details,
+                                 how='left',
+                                 on=['transaction_hash','timestamp','block_number']).drop_duplicates()
+    if (pool_final['gas_price'].isna().sum())==0 and (pool_df.shape[0]==pool_final.shape[0]):
+        print("Transactions Dataframe Created Successfully")
+    else:
+        print("Issue with creating final dataframe with gas prices.")
+        return None
+
+    return pool_final 
 
 def fetch_latest_block(url):
     # Request payload
@@ -23,7 +59,7 @@ def fetch_latest_block(url):
     }
     
     # Make the request
-    response = requests.post(ALCHEMY_URL, json=payload)
+    response = requests.post(url, json=payload)
     
     # Handle the response
     if response.status_code == 200:
@@ -79,7 +115,7 @@ def fetch_block_range(url, pool_address, latest_block, nblocks):
     
     return data['result']
 
-def decode_block_data(swap_tx_data, block_number,transaction_hash,datatype_list,verbose=False):
+def decode_block_data(url, swap_tx_data, block_number,transaction_hash,datatype_list,verbose=False):
     """
     
     # Call for a single block
@@ -89,7 +125,8 @@ def decode_block_data(swap_tx_data, block_number,transaction_hash,datatype_list,
     block_data = decode_block_data(swap_tx_data,block_number,verbose=True)
     
     """
-    
+    w3 = Web3(Web3.HTTPProvider(url))
+
     ETH_RES  = 1e18
     USDC_RES = 1e6
     amount0, amount1, sqrtPriceX96, liquidity, tick = w3.eth.codec.decode(datatype_list,bytes.fromhex(swap_tx_data[2:]))
@@ -124,7 +161,7 @@ def decode_block_data(swap_tx_data, block_number,transaction_hash,datatype_list,
         'block_number':block_number,
     }
 
-def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0):
+def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0,verbose=False):
     """
     Return: DataFrame with df.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
        'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
@@ -136,19 +173,18 @@ def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0):
     while latest_block_number==0:
         time.sleep(1)
         print('.',end='',flush=True)
-        latest_block_number = fetch_latest_block_v2(url)
+        latest_block_number = fetch_latest_block(url)
     
-    print(f"")
-    print(f"Latest Block: {latest_block_number}")
+    #print(f"Latest Block: {latest_block_number}")
     start = time.time()
     # Now that I know the latest block number I can pull pool transactions by block range.
     # Est. Requests: 1 API request Per function call
     pool_tx_rawdata = fetch_block_range(url, pool_address, latest_block_number, nblocks)
     ntxs_found = len(pool_tx_rawdata)
     finish = time.time()
-    print(f"Found {ntxs_found} Swap Transactions from {latest_block_number-nblocks} to {latest_block_number}")
-    print(f"Time to fetch blocks: {finish-start}")
-
+    if verbose: 
+        print(f"Found {ntxs_found} Swap Transactions from {latest_block_number-nblocks} to {latest_block_number}")
+        print(f"Time to fetch blocks: {finish-start}")
     
     # Parse the raw data, decode blocks.  Each call the decode_block_data has one call in it, 
     # to fetch the timestamp, so beware rate limit gods.
@@ -177,7 +213,7 @@ def fetch_swap_pool(url, pool_address, nblocks,latest_block_number=0):
         block = int(d['blockNumber'],16)
         data = d['data']
         transaction_hash=d['transactionHash']
-        raw_data.append(decode_block_data(data,block,transaction_hash,datatype_list))
+        raw_data.append(decode_block_data(url, data,block,transaction_hash,datatype_list))
         #if (i % 100)==0: print(f"{i}, ",end='')
     
     pool_tx_data = pd.DataFrame(raw_data)
@@ -232,7 +268,7 @@ def fetch_with_retries(url, batch_request, max_retries=5, initial_wait=1, max_wa
     raise Exception("Failed to fetch data after multiple retries")
 
 
-def fetch_block_details(pool_df,include_all_objects=True):
+def fetch_block_details(url, pool_df,include_all_objects=True, verbose=False):
 
     # Get the blocks in chunks of MAX_BLOCKS
     all_blockdata = []
@@ -251,11 +287,12 @@ def fetch_block_details(pool_df,include_all_objects=True):
     
         # Fetch the result with retries
         try:
-            blockdata_rsp = fetch_with_retries(ALCHEMY_URL, batch_request)
+            blockdata_rsp = fetch_with_retries(url, batch_request)
         except Exception as e:
             print(f"Request failed after multiple retries: {e}")
         finish = time.time()
-        print(f"Time to process {len(block_number_chunk)} blocks: {finish-start}")
+        if verbose: 
+            print(f"Time to process {len(block_number_chunk)} blocks: {finish-start}")
     
     
         #display(pool0_merge.shape
@@ -308,7 +345,7 @@ def parse_block_details(pool_blocks,verbose=False):
             print(f"Error fetching data: {block_details}")
     return pd.DataFrame(pool_block_details)
 
-def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
+def create_pool_df(pool_in,transaction_rate,t0_res=18, t1_res=18, num=0):
     """
     TODO: right now, this only works with WETH / USDC.  
     - Implement t#_res to work with other pools.
@@ -352,6 +389,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
     #pool_swap_df = extract_swap_df(pool_id,'./pools/.')
     
     # Reorders things in time series
+    pool_swap_df = pool_in.copy()
     pool_swap_df = pool_swap_df.sort_values(by='timestamp')
     
     # Creating columns directly from extracted data...
@@ -365,7 +403,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
     pool_swap_df[f'p{num}.sqrtPriceX96'] = pool_swap_df['sqrtPriceX96'].astype(float)
     pool_swap_df[f'p{num}.gasUsed'] = pool_swap_df['transaction.gasUsed']
     pool_swap_df[f'p{num}.gasPrice'] = pool_swap_df['transaction.gasPrice']
-    pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['transaction.blockNumber']
+    pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['blockNumber']
     pool_swap_df[f'p{num}.sender'] = pool_swap_df['sender']
     pool_swap_df[f'p{num}.recipient'] = pool_swap_df['recipient']
     pool_swap_df[f'p{num}.transaction_id'] = pool_swap_df['transaction.id']
@@ -374,7 +412,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
     pool_swap_df[f'p{num}.transaction_type']=0
     pool_swap_df[f'p{num}.transaction_rate']=transaction_rate
     pool_swap_df[f'p{num}.eth_price_usd'] = ((pool_swap_df[f'p{num}.sqrtPriceX96'] / 2**96)**2 / 1e12) **-1
-    pool_swap_df[f'p{num}.gas_fees_usd'] = (pool_swap_df[f'p{num}.gasPrice'] / 1e9 )*(pool_swap_df[f'p{num}.gasUsed'] / 1e9) * pool_swap_df[f'p{num}.eth_price_usd']
+    pool_swap_df[f'p{num}.gas_fees_usd'] = (pool_swap_df[f'p{num}.gasPrice'] )*(pool_swap_df[f'p{num}.gasUsed'] / 1e9) * (pool_swap_df[f'p{num}.eth_price_usd'])
     pool_swap_df[f'p{num}.transaction_fees_usd'] = np.abs(pool_swap_df[f'p{num}.t1_amount'] * pool_swap_df[f'p{num}.transaction_rate']) * pool_swap_df[f'p{num}.eth_price_usd']
     pool_swap_df[f'p{num}.total_fees_usd'] = pool_swap_df[f'p{num}.gas_fees_usd'] + pool_swap_df[f'p{num}.transaction_fees_usd']
 
@@ -387,6 +425,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
 
     p_df = pool_swap_df[['time',
                         'timestamp',
+                        'blockNumber',
                         f'p{num}.transaction_time',
                         f'p{num}.transaction_epoch_time',
                         f'p{num}.t0_amount',
@@ -411,7 +450,7 @@ def create_pool_df(pool_swap_df,transaction_rate,t0_res=18, t1_res=18, num=0):
     
     return p_df    
 
-def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
+def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee, verbose=False):
     """
     From the original data dictionary...
     
@@ -425,12 +464,12 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     pool_swap_df[f'p{num}.sqrtPriceX96'] = pool_swap_df['sqrtPriceX96'].astype(float)
     pool_swap_df[f'p{num}.gasUsed'] = pool_swap_df['transaction.gasUsed']
     pool_swap_df[f'p{num}.gasPrice'] = pool_swap_df['transaction.gasPrice']
-    pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['transaction.blockNumber']
+    pool_swap_df[f'p{num}.blockNumber'] = pool_swap_df['blockNumber']
     pool_swap_df[f'p{num}.sender'] = pool_swap_df['sender']
     pool_swap_df[f'p{num}.recipient'] = pool_swap_df['recipient']
     pool_swap_df[f'p{num}.transaction_id'] = pool_swap_df['transaction.id']
     """
-    p0.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
+    p0.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
 
     # add other columns.
     p0['timestamp'] = p0['time'].apply(lambda x: x.timestamp())
@@ -438,7 +477,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     p0['pool.token1.name'] = 'WETH'
 
     
-    p1.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','transaction.blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
+    p1.columns = ['transaction.id','time','sqrtPriceX96','tick','eth_price_usd','amount0','amount1','liquidity','blockNumber','transaction.gasPrice','transaction.gasUsed','sender','recipient']
     # add other columns.
     p1['timestamp'] = p1['time'].apply(lambda x: x.timestamp())
     p1['pool.token0.name'] = 'USDC'
@@ -449,7 +488,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     pool1_swap_df = create_pool_df(p1,transaction_rate=p1_txn_fee,num=1)
 
     # Merge with Forward Fill in Time
-    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp'], how='outer').sort_values(by='timestamp')
+    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp','blockNumber'], how='outer').sort_values(by='timestamp')
     both_pools = both_pools.ffill().reset_index(drop=True)
     ###########
     # Add columns that include information from both pools.
@@ -487,53 +526,15 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     both_pools = both_pools.iloc[new_first_row:]
     
     has_nans = both_pools.isna().any().any()
-    print("Are there any NaNs in the DataFrame?", has_nans)
+    if verbose: 
+        print("Are there any NaNs in the DataFrame?", has_nans)
 
     return both_pools
 
-def alchemy_request(url, pool_address, blocks_to_look_back=40, latest_block=0):
-   
-    #
-    # Look for Swap Events in the duration from "latest block" to "latest block - blocks_to_look_back"
-    #
-    # pool_df.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
-    #   'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
-    #   'block_number']
-    pool_df, npool_txs, _ = fetch_swap_pool(url, 
-                                            pool_address, 
-                                            blocks_to_look_back, 
-                                            latest_block)
-    
-    print("")
-    if npool_txs == 0:
-        print("Pool: Did not find any transactions in the window specified.")
-        return None
-        
-    else:
-        print(f"Latest Block Timestamp: {pool_df['timestamp'].max()-pd.Timedelta(hours=4)}")
-        pool_total_minutes = (pool_df['timestamp'].max()-pool_df['timestamp'].min()).total_seconds() / 60
-        print(f"Duration of Pool Data (in minutes): {pool_total_minutes} minutes")
-
-    #
-    # Get detailed block data from block numbers...
-    #
-    # pool_block_details.columns = ['timestamp', 'transaction_hash', 'block_number', 'gas_price',
-    #   'gas_used', 'sender', 'recipient']
-    pool_block_details = fetch_block_details(pool_df)
-
-    # merge 
-    pool_final = pool_df.merge(pool_block_details,
-                                 how='left',
-                                 on=['transaction_hash','timestamp','block_number']).drop_duplicates()
-    if (pool_final['gas_price'].isna().sum())==0 and (pool_df.shape[0]==pool_final.shape[0]):
-        print("All transactions merged Successfully")
-    else:
-        print("Issue with creating final dataframe with gas prices.")
-        return None
-
-    return pool_final
-
-if __name__ == "__main__":
+def demo():
+    # Add environmental variable ALCHEMY_API_KEY
+    ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
+    ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
     
     POOL0_ADDRESS="0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640" # USDC / WETH (0.05%) 
     POOL0_TXN_FEE = 0.0005
@@ -555,7 +556,36 @@ if __name__ == "__main__":
                                POOL1_ADDRESS, 
                                blocks_to_look_back=LAST_60MIN_BLOCKS,
                                latest_block=latest_block_number)    
-    
     both_pools = merge_pool_data_v2(pool0_df, POOL0_TXN_FEE, pool1_df, POOl1_TXN_FEE)
+
+
+if __name__ == "__main__":
+    # Add environmental variable ALCHEMY_API_KEY
+    ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
+    ALCHEMY_URL = f'https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}'
+    
+    POOL0_ADDRESS="0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640" # USDC / WETH (0.05%) 
+    POOL0_TXN_FEE = 0.0005
+    POOL1_ADDRESS="0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8" # USDC / WETH (0.3%)
+    POOl1_TXN_FEE = 0.003
+
+    # Ethereum is estimated to have a transaction speed of one block per 12 seconds (5 times a minute).
+    LAST_60MIN_BLOCKS= int(np.floor(5 * 60))
+
+    # Use the same latest block for both requests...
+    # better to do the least frequent of the two second
+    latest_block_number = fetch_latest_block(ALCHEMY_URL)
+    
+
+    #
+    # Look for Swap Events in the duration from "latest block" to "latest block - blocks_to_look_back"
+    #
+    # pool_df.columns = ['transaction_hash', 'timestamp', 'sqrtPriceX96', 'tick',
+    #   'eth_price_usd', 'usdc_amount0', 'eth_amount1', 'liquidity',
+    #   'block_number']
+    pool_df, npool_txs, _ = fetch_swap_pool(ALCHEMY_URL, 
+                                            POOL0_ADDRESS, 
+                                            LAST_60MIN_BLOCKS, 
+                                            latest_block_number)
     
     
