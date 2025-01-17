@@ -3,11 +3,14 @@ import os
 import unittest
 import pandas as pd
 import numpy as np
-import datetime
 import pytz
 import shutil
 
+from datetime import datetime
+
+# local modules
 import src.arbutils as arbutils
+import src.fetch as fetch
 
 from sklearn.metrics import root_mean_squared_error, r2_score
 
@@ -25,31 +28,31 @@ class TestAppMethods(unittest.TestCase):
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
         # Creates datetime objects.  
-        #                              YYYY  MM  DD  HH  MM  SS
-        old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
-        new_date = datetime.datetime(*(2025,  1, 15,  0,  0,  0), tzinfo=pytz.UTC)
+        #                     YYYY  MM  DD  HH  MM  SS
+        old_date = datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
+        new_date = datetime(*(2025,  1, 14,  1,  0,  0), tzinfo=pytz.UTC)
 
 
-        df0 = arbutils.thegraph_request(GRAPH_API_KEY,
+        df0 = fetch.thegraph_request(GRAPH_API_KEY,
                                         ETHERSCAN_API_KEY, 
                                         pool_address=pool0_address,
                                         old_date=old_date,
                                         new_date=new_date,
-                                        batch_size=10)
+                                        batch_size=2)
         
-        df1 = arbutils.thegraph_request(GRAPH_API_KEY,
+        df1 = fetch.thegraph_request(GRAPH_API_KEY,
                                         ETHERSCAN_API_KEY, 
                                         pool_address=pool0_address,
                                         old_date=old_date,
                                         new_date=new_date,
-                                        batch_size=100)
+                                        batch_size=3)
         
-        df2 = arbutils.thegraph_request(GRAPH_API_KEY,
+        df2 = fetch.thegraph_request(GRAPH_API_KEY,
                                         ETHERSCAN_API_KEY, 
                                         pool_address=pool0_address,
                                         old_date=old_date,
                                         new_date=new_date,
-                                        batch_size=1000)
+                                        batch_size=4)
         print(df0.shape, df1.shape, df2.shape)
         
         self.assertEqual(df0.shape,df1.shape,df2.shape)
@@ -62,7 +65,7 @@ class TestAppMethods(unittest.TestCase):
         GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-        df_results = arbutils.thegraph_request(GRAPH_API_KEY,
+        df_results = fetch.thegraph_request(GRAPH_API_KEY,
                                                ETHERSCAN_API_KEY, 
                                       pool_address=pool0_address)
 
@@ -107,11 +110,11 @@ class TestAppMethods(unittest.TestCase):
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
         # Creates datetime objects.  
-        #                              YYYY  MM  DD  HH  MM  SS
-        old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
-        new_date = datetime.datetime(*(2025,  1, 18,  0,  0,  0), tzinfo=pytz.UTC)
+        #                     YYYY  MM  DD  HH  MM  SS
+        old_date = datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
+        new_date = datetime(*(2025,  1, 18,  0,  0,  0), tzinfo=pytz.UTC)
 
-        df_results = arbutils.thegraph_request(GRAPH_API_KEY,
+        df_results = fetch.thegraph_request(GRAPH_API_KEY,
                                         ETHERSCAN_API_KEY, 
                                         pool_address=pool0_address,
                                         old_date=old_date,
@@ -158,13 +161,12 @@ class TestAppMethods(unittest.TestCase):
         GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-
         # Creates datetime objects.  
-        #                              YYYY  MM  DD  HH  MM  SS
-        old_date = datetime.datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
-        new_date = datetime.datetime(*(2025,  1, 14,  0,  2,  0), tzinfo=pytz.UTC)
+        #                     YYYY  MM  DD  HH  MM  SS
+        old_date = datetime(*(2025,  1, 14,  0,  0,  0), tzinfo=pytz.UTC)
+        new_date = datetime(*(2025,  1, 14,  2,  0,  0), tzinfo=pytz.UTC)
         
-        data_path = f'data/{pool0_address}'
+        data_path = f'data/'
         checkpoint_file = 'checkpoint.json'
 
         # Delete the file if it exists
@@ -183,17 +185,33 @@ class TestAppMethods(unittest.TestCase):
             except Exception as e:
                 print(f"Error deleting directory: {data_path}. Error: {e}")
 
+        df_results = fetch.thegraph_request(GRAPH_API_KEY, 
+                                    ETHERSCAN_API_KEY,
+                                    pool_address=pool0_address,
+                                    new_date=new_date, 
+                                    old_date=old_date, 
+                                    data_path=data_path, 
+                                    checkpoint_file=checkpoint_file)
 
-        df_results = arbutils.thegraph_request(GRAPH_API_KEY, 
-                                      ETHERSCAN_API_KEY,
-                                      pool_address=pool0_address,
-                                      new_date=new_date, 
-                                      old_date=old_date, 
-                                      data_path=data_path, 
-                                      checkpoint_file=checkpoint_file)
-        
+        print("Cleaning Up.")
+        # Delete the file
+        if os.path.isfile(checkpoint_file):
+            try:
+                os.remove(checkpoint_file)
+                print(f"Deleted file: {checkpoint_file}")
+            except Exception as e:
+                print(f"Error deleting file: {checkpoint_file}. Error: {e}")
 
-        self.assertEqual(type('str'), type(df_results))
+        # Delete the directory
+        if os.path.isdir(data_path):
+            try:
+                shutil.rmtree(data_path)
+                print(f"Deleted directory: {data_path}")
+            except Exception as e:
+                print(f"Error deleting directory: {data_path}. Error: {e}")
+
+        self.assertEqual(pd.DataFrame, type(df_results))
+
 
     def test_etherscan_request_v2(self):
         #
@@ -201,7 +219,7 @@ class TestAppMethods(unittest.TestCase):
         # Note: this method assumes the pools are WETH/USDC pair.
         #
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-        df_results = arbutils.etherscan_request_v2(ETHERSCAN_API_KEY, 
+        df_results = fetch.etherscan_request_v2(ETHERSCAN_API_KEY, 
                                       pool_address=pool0_address)
 
         valid_columns = ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
@@ -241,10 +259,22 @@ class TestAppMethods(unittest.TestCase):
         #
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
-        df_results = arbutils.etherscan_request(ETHERSCAN_API_KEY, address=pool0_address)
-        valid_columns = ['blockNumber', 'timeStamp', 'hash', 'from', 'to', 'WETH_value',
-       'USDC_value', 'tokenName_WETH', 'tokenName_USDC', 'gas', 'gasPrice',
-       'gasUsed', 'cumulativeGasUsed', 'confirmations']
+        df_results = fetch.etherscan_request_tokentx(ETHERSCAN_API_KEY, pool0_address)
+        valid_columns = ['blockNumber',
+                'timeStamp',
+                'transactionHash',
+                'from',
+                'to',
+                'WETH_value',
+                'USDC_value',
+                'tokenName_WETH',
+                'tokenName_USDC',
+                'gas',
+                'gasPrice',
+                'gasUsed',
+                'cumulativeGasUsed',
+                'confirmations']
+        
         
         actual_columns = list(df_results.columns)
         
@@ -268,59 +298,29 @@ class TestAppMethods(unittest.TestCase):
         # Test merging two pools of data for valid columns
         # Note: this assumes the pools are WETH/USDC pair.
         #
-        # consolidated_data[tx_hash] = {
-        #        'blockNumber': row['blockNumber'],
-        #        'timeStamp': row['timeStamp'],
-        #        'hash': tx_hash,
-        #        'from': row['from'],
-        #        'to': row['to'],
-        #        'WETH_value': 0,
-        #        'USDC_value': 0,
-        #        'tokenName_WETH': '',
-        #        'tokenName_USDC': '',
-        #        'gas': row['gas'],
-        #        'gasPrice': row['gasPrice'],
-        #        'gasUsed': row['gasUsed'],
-        #        'cumulativeGasUsed': row['cumulativeGasUsed'],
-        #        'confirmations': row['confirmations']
-        #    }
         # Define the number of rows for the dummy DataFrame
         num_rows = 10
 
         # Create dummy data
         data_p0 = {
             'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            #'hash': np.random.uniform(1900, 2100, size=num_rows),           
-            #'from': np.random.uniform(5, 15, size=num_rows),                
-            #'to': np.random.uniform(1900, 2100, size=num_rows),           
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers          
             'WETH_value': np.random.uniform(0, 10000, size=num_rows),       
             'USDC_value': np.random.uniform(0, 20000, size=num_rows),       
-            #'tokenName_WETH': np.random.uniform(1900, 2100, size=num_rows),
-            #'tokenName_USDC': np.random.uniform(1900, 2100, size=num_rows),
-            'gas': np.random.uniform(0, 100000, size=num_rows),             
-            'gasPrice': np.random.uniform(0, 100000, size=num_rows),        
-            'gasUsed': np.random.uniform(0, 100000, size=num_rows),        
-            'cumulativeGasUsed': np.random.uniform(0, 100000, size=num_rows),
-            #'confirmations': np.random.uniform(0, 100000, size=num_rows),   
-
-        }
-        # Create dummy data
-        data_p1 = {
-            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
-            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            #'hash': np.random.uniform(1900, 2100, size=num_rows),           
-            #'from': np.random.uniform(5, 15, size=num_rows),                
-            #'to': np.random.uniform(1900, 2100, size=num_rows),           
-            'WETH_value': np.random.uniform(0, 10000, size=num_rows),       
-            'USDC_value': np.random.uniform(0, 20000, size=num_rows),       
-            #'tokenName_WETH': np.random.uniform(1900, 2100, size=num_rows),
-            #'tokenName_USDC': np.random.uniform(1900, 2100, size=num_rows),
             'gas': np.random.uniform(0, 100000, size=num_rows),         
             'gasPrice': np.random.uniform(0, 100000, size=num_rows),
             'gasUsed': np.random.uniform(0, 100000, size=num_rows),
-            'cumulativeGasUsed': np.random.uniform(0, 100000, size=num_rows),
-            #'confirmations': np.random.uniform(0, 100000, size=num_rows),   
+        }
+
+        # Create dummy data
+        data_p1 = {
+            'timeStamp': np.arange(1672531200, 1672531200 + num_rows * 3600, 3600),         # Sequential UNIX timestamps
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers          
+            'WETH_value': np.random.uniform(0, 10000, size=num_rows),       
+            'USDC_value': np.random.uniform(0, 20000, size=num_rows),       
+            'gas': np.random.uniform(0, 100000, size=num_rows),         
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),
         }
 
         p0 = pd.DataFrame(data_p0)
@@ -348,57 +348,53 @@ class TestAppMethods(unittest.TestCase):
 
         # Create dummy data
         data_p0 = {
-            'transaction_hash': ["0x45"]*num_rows,                    
-            'timestamp': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'transactionHash': ["0x45"]*num_rows,                    
+            'datetime': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'timeStamp': np.random.uniform(-10000, 10000, size=num_rows),                            
             'sqrtPriceX96': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),        
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),        
             'tick': np.random.uniform(-10000, 10000, size=num_rows),                            
-            'eth_price_usd': np.random.uniform(0, 10000, size=num_rows),       
-            'usdc_amount0': np.random.uniform(0, 20000, size=num_rows),       
-            'eth_amount1': np.random.uniform(0, 20000, size=num_rows),       
+            'amount0': np.random.uniform(0, 20000, size=num_rows),       
+            'amount1': np.random.uniform(0, 20000, size=num_rows),       
             'liquidity': np.random.uniform(0, 20000, size=num_rows),       
-            'block_number': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            'gas_price': np.random.uniform(0, 100000, size=num_rows),        
-            'gas_used': np.random.uniform(0, 100000, size=num_rows),        
-            'sender': ["0x35"]*num_rows,   
-            'recipient': ["0x35"]*num_rows,   
         }
 
         # Create dummy data
         data_p1 = {
-            'transaction_hash': ["0x45"]*num_rows,                    
-            'timestamp': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'transactionHash': ["0x45"]*num_rows,                    
+            'datetime': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'timeStamp': np.random.uniform(-10000, 10000, size=num_rows),                            
             'sqrtPriceX96': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),        
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),        
             'tick': np.random.uniform(-10000, 10000, size=num_rows),                            
-            'eth_price_usd': np.random.uniform(0, 10000, size=num_rows),       
-            'usdc_amount0': np.random.uniform(0, 20000, size=num_rows),       
-            'eth_amount1': np.random.uniform(0, 20000, size=num_rows),       
+            'amount0': np.random.uniform(0, 20000, size=num_rows),       
+            'amount1': np.random.uniform(0, 20000, size=num_rows),       
             'liquidity': np.random.uniform(0, 20000, size=num_rows),       
-            'block_number': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
-            'gas_price': np.random.uniform(0, 100000, size=num_rows),        
-            'gas_used': np.random.uniform(0, 100000, size=num_rows),        
-            'sender': ["0x35"]*num_rows,   
-            'recipient': ["0x35"]*num_rows,   
         }
 
         p0 = pd.DataFrame(data_p0)
         p1 = pd.DataFrame(data_p1)
 
-        valid_output_columns = ['time', 'timestamp', 'p1.transaction_time', 'p1.transaction_epoch_time',
-                'p1.t0_amount', 'p1.t1_amount', 'p1.t0_token', 'p1.t1_token', 'p1.tick',
-                'p1.sqrtPriceX96', 'p1.gasUsed', 'p1.gasPrice', 'p1.blockNumber',
-                'p1.sender', 'p1.recipient', 'p1.transaction_id', 'p1.transaction_type',
-                'p1.transaction_rate', 'p1.eth_price_usd', 'p1.transaction_fees_usd',
-                'p1.gas_fees_usd', 'p1.total_fees_usd', 'p0.transaction_time',
-                'p0.transaction_epoch_time', 'p0.t0_amount', 'p0.t1_amount',
-                'p0.t0_token', 'p0.t1_token', 'p0.tick', 'p0.sqrtPriceX96',
-                'p0.gasUsed', 'p0.gasPrice', 'p0.blockNumber', 'p0.sender',
-                'p0.recipient', 'p0.transaction_id', 'p0.transaction_type',
-                'p0.transaction_rate', 'p0.eth_price_usd', 'p0.transaction_fees_usd',
-                'p0.gas_fees_usd', 'p0.total_fees_usd', 'percent_change',
-                'total_gas_fees_usd', 'total_transaction_rate',
-                'total_transaction_fees_used', 'total_fees_usd', 'swap_go_nogo']
+        valid_output_columns = ['time', 'timestamp', 'blockNumber', 'p1.transaction_time',
+                        'p1.transaction_epoch_time', 'p1.t0_amount', 'p1.t1_amount',
+                        'p1.t0_token', 'p1.t1_token', 'p1.tick', 'p1.sqrtPriceX96',
+                        'p1.gasUsed', 'p1.gasPrice', 'p1.transaction_id', 'p1.transaction_type',
+                        'p1.transaction_rate', 'p1.eth_price_usd', 'p1.transaction_fees_usd',
+                        'p1.gas_fees_usd', 'p1.total_fees_usd', 'p0.transaction_time',
+                        'p0.transaction_epoch_time', 'p0.t0_amount', 'p0.t1_amount',
+                        'p0.t0_token', 'p0.t1_token', 'p0.tick', 'p0.sqrtPriceX96',
+                        'p0.gasUsed', 'p0.gasPrice', 'p0.transaction_id', 'p0.transaction_type',
+                        'p0.transaction_rate', 'p0.eth_price_usd', 'p0.transaction_fees_usd',
+                        'p0.gas_fees_usd', 'p0.total_fees_usd', 'percent_change',
+                        'total_gas_fees_usd', 'total_transaction_rate',
+                        'total_transaction_fees_used', 'total_fees_usd', 'swap_go_nogo']
 
         df_results = arbutils.merge_pool_data_v2(p0,pool0_tx_fee,p1,pool1_tx_fee)
+
         actual_columns = list(df_results.columns)
 
         self.assertEqual(actual_columns, valid_output_columns)

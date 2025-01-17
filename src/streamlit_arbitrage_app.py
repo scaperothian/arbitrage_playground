@@ -1,28 +1,32 @@
-import streamlit as st
 import os
+import pickle
+import pytz
+import random
+import time
+
+from datetime import datetime, timedelta
+
+import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
-import requests
+
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from datetime import datetime, timedelta
-import pytz
-
 from sklearn.metrics import root_mean_squared_error, r2_score
 import xgboost as xgb
-
-#import tensorflow as tf
-import random
-import time
 import lightgbm as lgb
-
 import seaborn as sns
 sns.set_style('darkgrid')
 
+# local modules
 import arbutils
+import fetch
+
+# Fetch the API key from environment variables
+GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 
 # ################################
 # CONFIGURABLE PARAMETERS
@@ -50,7 +54,7 @@ gas_fees_model_name = model_params['GAS_FEES_MODEL_NAME']
 
 # fetch data from mainnet
 @st.cache_data(ttl=60)
-def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='etherscan_legacy'):
+def fetch_data(thegraph_api_key, etherscan_api_key, address0, txn_rate0, address1, txn_rate1, method='etherscan_legacy'):
     """
     etherscan_legacy: legacy method (fast mode).  does not use sqrtPriceX96 (training data for models use this value).
                     percent changes are inflated.  much, much faster to return data for analysis and
@@ -59,12 +63,12 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
                     investment because of the time to fetch that much data.
     """
     if method == 'etherscan':
-        p0 = arbutils.etherscan_request_v2(api_key, address0)
+        p0 = fetch.etherscan_request_v2(etherscan_api_key, address0)
         if p0 is None:
             st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
             raise Exception
         
-        p1 = arbutils.etherscan_request_v2(api_key, address1)
+        p1 = fetch.etherscan_request_v2(etherscan_api_key, address1)
         if p1 is None:
             st.error("Failed to fetch Pool 1 data from Etherscan. Please check your API key and try again.")
             raise Exception
@@ -72,12 +76,12 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
         merged_pools = arbutils.merge_pool_data_v2(p0, txn_rate0, p1, txn_rate1)
     
     elif method == 'etherscan_analysis':
-        p0 = arbutils.etherscan_request_v2(api_key, address0,max_samples=None)
+        p0 = fetch.etherscan_request_v2(etherscan_api_key, address0,max_samples='all',lookback_minutes=30)
         if p0 is None:
             st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
             raise Exception
         
-        p1 = arbutils.etherscan_request_v2(api_key, address1,max_samples=None)
+        p1 = fetch.etherscan_request_v2(etherscan_api_key, address1,max_samples='all',lookback_minutes=30)
         if p1 is None:
             st.error("Failed to fetch Pool 1 data from Etherscan. Please check your API key and try again.")
             raise Exception
@@ -86,12 +90,12 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
     
 
     elif method == 'etherscan_legacy':
-        p0 = arbutils.etherscan_request(api_key, address0)
+        p0 = fetch.etherscan_request_tokentx(etherscan_api_key, address0)
         if p0 is None:
             st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
             raise Exception
         
-        p1 = arbutils.etherscan_request(api_key, address1)
+        p1 = fetch.etherscan_request_tokentx(etherscan_api_key, address1)
         if p1 is None:
             st.error("Failed to fetch Pool 1 data from Etherscan. Please check your API key and try again.")
             raise Exception
@@ -100,15 +104,14 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
     
     elif method == 'thegraph':
         # work around for gasUsed issue...
-        etherscan_api_key = os.getenv("ETHERSCAN_API_KEY")
-        p0 = arbutils.thegraph_request(api_key,
+        p0 = fetch.thegraph_request(thegraph_api_key,
                                     etherscan_api_key,
                                     address0)
         if (p0 is None) or (type(p0)==str):
             st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
             raise Exception
         
-        p1 = arbutils.thegraph_request(api_key, 
+        p1 = fetch.thegraph_request(thegraph_api_key, 
                                     etherscan_api_key,                                    
                                     address1)
         if (p1 is None) or (type(p1)==str):
@@ -116,13 +119,13 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
             raise Exception
 
         merged_pools = arbutils.merge_pool_data_v2(p0, txn_rate0, p1, txn_rate1)
+    
     elif method == 'thegraph_analysis':
         # Create timestamps based on the latest timestamp...for inference
         new_date = datetime.now(pytz.UTC)
         old_date = new_date - timedelta(hours=36)
-        etherscan_api_key = os.getenv("ETHERSCAN_API_KEY")
 
-        p0 = arbutils.thegraph_request(api_key, 
+        p0 = fetch.thegraph_request(thegraph_api_key, 
                                     etherscan_api_key,           
                                     address0,
                                     old_date=old_date,
@@ -132,7 +135,7 @@ def fetch_data(api_key, address0, txn_rate0, address1, txn_rate1, method='ethers
             st.error("Failed to fetch Pool 0 data from Etherscan. Please check your API key and try again.")
             raise Exception
         
-        p1 = arbutils.thegraph_request(api_key, 
+        p1 = fetch.thegraph_request(thegraph_api_key, 
                                     etherscan_api_key,           
                                     address1,
                                     old_date=old_date,
@@ -242,13 +245,16 @@ def create_min_investment_breakout(last_sample, pred_sample, model_forecast_wind
     block_num = f"{last_sample['blockNumber']}"
     block_num_pred = f"{int(last_sample['blockNumber']) + 5 * model_forecast_window_min}" # blocks created every 12s 
     T_pred = f"{pred_sample['time']+timedelta(minutes=1)}"
-    
+    A0 = f"{last_sample['p0.transaction_id']}"
+    print(f"Last Transaction ID for Pool 0:  {A0}")
     A1 = f"{last_sample['p0.eth_price_usd']:.2f}"          # Pool 0 Price USDC / WETH
     A2 = f"{pool0_txn_fee:.5f}"                            # Pool 0 Transaction Fee Rate 
     A3 = f"{np.abs(last_sample['p0.t0_amount']):.2f}"                # Pool 0 transaction amount
     A4 = f"{np.abs(pool0_txn_fee*last_sample['p0.t0_amount']):.5f}"  # Pool 0 Transaction Fee Costs for that amount
     A5 = f"{last_sample['p0.gas_fees_usd']:.2f}"           # Pool 0 Gas Fees
     
+    B0 = f"{last_sample['p1.transaction_id']}"
+    print(f"Last Transaction ID for Pool 1:  {B0}")
     B1 = f"{last_sample['p1.eth_price_usd']:.2f}"          # Pool 0 Price USDC / WETH
     B2 = f"{pool1_txn_fee:.5f}"                            # Pool 0 Transaction Fee Rate 
     B3 = f"{np.abs(last_sample['p1.t0_amount']):.2f}"                # Pool 0 transaction amount
@@ -274,8 +280,8 @@ def create_min_investment_breakout(last_sample, pred_sample, model_forecast_wind
     M = f"{M:.2f}"
     
     table_dict = {
-        'Last Transaction': [T_lt,block_num,A1,A2, A3, A4, A5, B1, B2, B3, B4, B5, G, H, L],
-        'Predicted': [T_pred,block_num_pred,'',B2, '', '', '', '', B2, '', '', '', J, K, M],
+        'Last Transaction': [T_lt  ,block_num,      A1, A2, A3, A4, A5, B1, B2, B3, B4, B5, G, H, L],
+        'Predicted':        [T_pred,block_num_pred, '', B2, '', '', '', '', B2, '', '', '', J, K, M],
         'Index': [
             'Timestamp (UTC)',
             'Block Number',
@@ -439,27 +445,27 @@ pool0_txn_fee = float(st.sidebar.selectbox(label="Pool 0 Transaction Fee (${T_0}
 pool1_address = st.sidebar.text_input("Pool 1 Address", "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8")
 pool1_txn_fee = float(st.sidebar.selectbox(label="Pool 1 Transaction Fee (${T_1}$)",options=[0.01, 0.003,0.0005,0.0001],index=1)) #select 0.003 by default.
 
-fetch_strategy = st.sidebar.selectbox(label="Advanced Data Pull Setting (see source): ",options=["etherscan_legacy", "etherscan","thegraph"],index=2) 
+fetch_strategy = st.sidebar.selectbox(label="Advanced Data Pull Setting (see source): ",options=["etherscan","thegraph"],index=1) 
 
-if fetch_strategy == 'etherscan_legacy':
-    # Fetch the API key from environment variables
-    API_KEY = os.getenv("ETHERSCAN_API_KEY")
-    inference_fetch_strategy = 'etherscan_legacy'
-    analysis_fetch_strategy = 'etherscan_legacy'
+
+
+
+if fetch_strategy == 'thegraph':
+    inference_fetch_strategy = 'thegraph'
+    analysis_fetch_strategy = 'thegraph_analysis'
 
 elif fetch_strategy == 'etherscan':
     # Fetch the API key from environment variables
-    API_KEY = os.getenv("ETHERSCAN_API_KEY")
     inference_fetch_strategy = 'etherscan'
     # work around because the fetch operations take so long
     # just use the old method for now.
     analysis_fetch_strategy = 'etherscan_analysis'
 
-elif fetch_strategy == 'thegraph':
+elif fetch_strategy == 'etherscan_legacy':
     # Fetch the API key from environment variables
-    API_KEY = os.getenv("GRAPH_API_KEY")
-    inference_fetch_strategy = 'thegraph'
-    analysis_fetch_strategy = 'thegraph_analysis'
+    inference_fetch_strategy = 'etherscan_legacy'
+    analysis_fetch_strategy = 'etherscan_legacy'
+
 else:
     print(f"WARNING: data pull strategy does not support {fetch_strategy}")
 
@@ -490,7 +496,8 @@ if st.button("Run Recommender"):
     # Run Inference Upfront
     ####################################################
     # Fetch merge data both pools
-    p0, p1, both_pools = fetch_data(API_KEY, 
+    p0, p1, both_pools = fetch_data(GRAPH_API_KEY,
+                                    ETHERSCAN_API_KEY, 
                                         pool0_address, 
                                         pool0_txn_fee, 
                                         pool1_address, 
@@ -593,7 +600,8 @@ if st.button("Run Recommender"):
         # fetch data, preprocess, load model, perform inference 
         #          
         # Fetch merge data both pools
-        p0, p1, both_pools = fetch_data(API_KEY, 
+        p0, p1, both_pools = fetch_data(GRAPH_API_KEY, 
+                                        ETHERSCAN_API_KEY,
                                             pool0_address, 
                                             pool0_txn_fee, 
                                             pool1_address, 
@@ -672,7 +680,7 @@ if st.button("Run Recommender"):
         #  Section 1: Rollup stats from past transactions
         #
         # ##########################################################################
-        st.subheader(f'Results from Previous {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s)')
+        st.subheader(f'Results from Previous {experiment_duration.total_seconds() / 3600:.1f} hour(s)')
 
         st.write(f"Number of Transactions: {number_of_simulated_swaps}")
              
@@ -699,7 +707,7 @@ if st.button("Run Recommender"):
             st.write(f"Model False Detection of Opportunities: {df_final['FalseDetection'].sum()} times or {df_final['FalseDetection'].sum()/df_final.shape[0]*100:.1f}%")
             st.write(f"Model Identified the correct pool {df_final['DetectedPool'].sum()} times or {df_final['DetectedPool'].sum()/df_final.shape[0]*100:.1f}%")
 
-            st.subheader(f"Recommended Minimum Investment in the last {np.round(experiment_duration.total_seconds() / 3600):.0f} hour(s).")
+            st.subheader(f"Recommended Minimum Investment in the last {experiment_duration.total_seconds() / 3600:.1f} hour(s).")
             
             # ##########################################################################
             #
