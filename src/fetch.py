@@ -525,10 +525,12 @@ def thegraph_request_with_pagination(thegraph_api_key, pool_address, old_date, n
         batch_num += 1
 
         if data_path:
-            batch_df.to_csv(f'{data_path}/{pool_address}/pool_id_{pool_address}_swap_batch_{batch_num}.csv')
+            batch_df.to_csv(f'{data_path}/pool_id_{pool_address}_swap_batch_{batch_num}.csv')
             checkpoint = {
+                'pool_id':pool_address,
                 'last_timestamp': oldest_id,
-                'batch_num': batch_num
+                'batch_num': batch_num,
+                'batch_size':batch_size
             }
             with open(checkpoint_file, 'w') as f:
                 json.dump(checkpoint, f)
@@ -557,7 +559,7 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date
     
     if data_path: 
         # Create data directory if it doesn't exist
-        os.makedirs(f'{data_path}/{pool_address}/', exist_ok=True)
+        os.makedirs(f'{data_path}/', exist_ok=True)
     
     swaps_data = thegraph_request_with_pagination(
         thegraph_api_key=thegraph_api_key,
@@ -620,8 +622,8 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date
         print(f"Swaps Found (After Merge): {swaps_df.shape}")   
 
     if data_path: 
-        swaps_df.to_csv(f'{data_path}/{pool_address}/pool_id_{pool_address}_swap_final.csv')
- 
+        swaps_df.to_csv(f'{data_path}/pool_id_{pool_address}_swap_final.csv')
+
     return swaps_df[['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
                 'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
                 'liquidity']]
