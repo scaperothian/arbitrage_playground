@@ -426,15 +426,18 @@ def thegraph_request_with_pagination(thegraph_api_key, pool_address, old_date, n
             tick
             pool {
                 id
+                liquidity
                 token0 {
                     id
                     symbol
                     name
+                    decimals
                 }
                 token1 {
                     id
                     symbol
                     name
+                    decimals
                 }
             }
             transaction {
@@ -548,11 +551,13 @@ def thegraph_request_pool_metadata(thegraph_api_key, pool_address):
           id
           symbol
           name
+          decimals
         }
         token1 {
           id
           symbol
           name
+          decimals
         }
         feeTier
         sqrtPrice
@@ -619,7 +624,6 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date
     # Create DataFrame
     swaps_df = json_normalize(swaps_data)
     
-
     swaps_df['transactionHash'] = swaps_df['transaction.id']
     swaps_df['datetime'] = swaps_df['timestamp'].apply(lambda x: datetime.fromtimestamp(int(x),tz=pytz.UTC))
     swaps_df['timeStamp'] = swaps_df['timestamp'].astype('int64')
@@ -630,7 +634,7 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date
     swaps_df['tick'] = swaps_df['tick'].astype('float')
     swaps_df['amount0'] = swaps_df['amount0'].astype('float')
     swaps_df['amount1'] = swaps_df['amount1'].astype('float')
-    swaps_df['liquidity'] = -1.0  #not implemented
+    swaps_df['liquidity'] = swaps_df['pool.liquidity'].astype('float')
 
     if swaps_df['gasUsed'].sum()==0:
         print(f"Swaps Found (Prior to Merge, Prior to drop_duplicates): {swaps_df.shape}")
@@ -659,7 +663,7 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date
                                                                    end_block=endblock)])
 
         if swaps_tokentx_df.shape[0] < swaps_df.shape[0]:
-            print("Error transfer tokens search should always yield more transactions.  Something is wrong with the batch fetch...")
+            print(f"Error transfer tokens ({swaps_tokentx_df.shape[0]}) search should always yield more transactions ({swaps_df.shape[0]}) than requests by block.  Something is wrong with the batch fetch...")
             return None
 
         #swaps_tokentx_df = etherscan_request_tokentx(etherscan_api_key, pool_address, start_block=startblock-1, end_block=endblock+1)

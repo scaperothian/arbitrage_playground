@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # Creates datetime objects for the fetch
     #                     YYYY  MM  DD  HH  MM  SS
     new_date = datetime(*(2025,  1, 14,  2,  0,  0), tzinfo=pytz.UTC)
-    old_date = new_date - timedelta(days=30)
+    old_date = new_date - timedelta(weeks=26)
     print(f"Attempting to fetch data from {old_date} to {new_date}")
 
     base_path = "data/"

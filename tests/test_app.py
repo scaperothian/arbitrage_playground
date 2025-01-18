@@ -22,7 +22,7 @@ pool0_address = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 pool1_address = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
 
 class TestAppMethods(unittest.TestCase):
-    
+
     def test_thegraph_request_validation(self):
         GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
         ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
@@ -398,6 +398,57 @@ class TestAppMethods(unittest.TestCase):
         actual_columns = list(df_results.columns)
 
         self.assertEqual(actual_columns, valid_output_columns)
+
+    def test_merge_pool_data_v3(self):
+            
+        GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+        
+        # Define the number of rows for the dummy DataFrame
+        num_rows = 10
+        pool0_tx_fee = 0.01
+        pool1_tx_fee = 0.01
+
+        # Create dummy data
+        data_p0 = {
+            'datetime': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'timeStamp': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),        
+            'transactionHash': ["0x45"]*num_rows,                    
+            'sqrtPriceX96': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),        
+            'tick': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'amount0': np.random.uniform(0, 20000, size=num_rows),       
+            'amount1': np.random.uniform(0, 20000, size=num_rows),       
+            'liquidity': np.random.uniform(0, 20000, size=num_rows),       
+        }
+
+        # Create dummy data
+        data_p1 = {
+            'datetime': pd.date_range(start='2029-01-01 00:00:00', periods=num_rows, freq='1ME'),  # Generate hourly timestamps
+            'timeStamp': np.random.uniform(0, 10000, size=num_rows),                            
+            'blockNumber': np.arange(200000, 200000 + num_rows),                            # Sequential block numbers
+            'gasPrice': np.random.uniform(0, 100000, size=num_rows),        
+            'transactionHash': ["0x43"]*num_rows,                    
+            'sqrtPriceX96': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'gasUsed': np.random.uniform(0, 100000, size=num_rows),        
+            'tick': np.random.uniform(-10000, 10000, size=num_rows),                            
+            'amount0': np.random.uniform(0, 20000, size=num_rows),       
+            'amount1': np.random.uniform(0, 20000, size=num_rows),       
+            'liquidity': np.random.uniform(0, 20000, size=num_rows),       
+        }
+
+        p0 = pd.DataFrame(data_p0)
+        p1 = pd.DataFrame(data_p1)
+
+        pool0_metadata = fetch.thegraph_request_pool_metadata(GRAPH_API_KEY, pool0_address)
+        pool1_metadata = fetch.thegraph_request_pool_metadata(GRAPH_API_KEY, pool1_address)
+
+        df = arbutils.merge_pool_data_v3(p0,pool0_metadata,p1,pool1_metadata)
+        print(df.columns)
+        print(df.dtypes)
+        print(df.head(10))
 
     def test_model_lgbm_preprocessing_inference(self):
         #
@@ -839,8 +890,8 @@ class TestAppMethods(unittest.TestCase):
                                         GAS_FEES_COL_NAME,
                                         PERCENT_CHANGE_COL_NAME,
                                         min_investment_col='min_amount_to_invest')
-        
-        self.assertTrue(math.isnan(df.iloc[0]['min_amount_to_invest']))
+
+        self.assertAlmostEqual(df.iloc[0]['min_amount_to_invest'],-112.657016,places=6)
 
     def test_min_investment_scenario_4(self):
         """

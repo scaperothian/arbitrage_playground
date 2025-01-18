@@ -12,6 +12,55 @@ from web3 import Web3
 
 from sklearn.model_selection import train_test_split
 
+def merge_pool_data_v3(p0, p0_params, p1, p1_params):
+    """
+    Input columns: ['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
+            'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
+            'liquidity', 'feeTier', 'token0Symbol', 'token1Symbol']]
+
+    Output columns: ['datetime', 'timeStamp', 'blockNumber', 'gasPrice', 'transactionHash', 'sqrtPriceX96',
+            'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
+            'liquidity']]
+    
+    """    
+    #
+    # Note: move ALL these into fetch before its all said and done...
+    #
+    TOKEN0 = p1_params['token0']['symbol'].upper()
+    TOKEN1 = p1_params['token1']['symbol'].upper()
+
+    TOKEN0_DECIMAL = int(p1_params['token0']['decimals'])
+    TOKEN1_DECIMAL = int(p1_params['token1']['decimals'])
+
+    tokenResolutionRatio = 10**(TOKEN1_DECIMAL - TOKEN0_DECIMAL)
+
+    p0['feeTier'] = float(p0_params['feeTier'])*1e-6
+    p1['feeTier'] = float(p1_params['feeTier'])*1e-6
+
+    # TOKEN0 / TOKEN1
+    p0[f'price'] = ((p0['sqrtPriceX96'] / 2**96)**2 / tokenResolutionRatio) **-1
+    p1[f'price'] = ((p1['sqrtPriceX96'] / 2**96)**2 / tokenResolutionRatio) **-1
+
+    pools = pd.merge(p0, p1, on=['datetime','timeStamp','blockNumber','gasPrice'], how='outer').sort_values(by='timeStamp')
+
+    # Rename columns
+    pools = pools.rename(
+        columns=lambda col: f"p0.{col.replace('_x', '')}" if '_x' in col else
+                            f"p1.{col.replace('_y', '')}" if '_y' in col else col
+    )
+
+    # don't calculate the fees until you merge with price...
+    pools[f'p0.gasFees{TOKEN0}'] = (pools['gasPrice'] / 1e9 )*(pools['p0.gasUsed'] / 1e9) * pools['p0.price']
+    pools[f'p1.gasFees{TOKEN0}'] = (pools['gasPrice'] / 1e9 )*(pools['p1.gasUsed'] / 1e9) * pools['p1.price']
+
+    # reseting index...
+    pools.reset_index(drop=False)
+
+    # Merge with Forward Fill in Time
+    pools = pools.ffill().reset_index(drop=True)
+
+    return pools
+
 def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     """
     compatible with etherscan_request_v2(...)
@@ -160,7 +209,7 @@ def merge_pool_data_v2(p0, p0_txn_fee, p1, p1_txn_fee):
     pool1_swap_df = create_pool_df(p1,transaction_rate=p1_txn_fee,num=1)
 
     # Merge with Forward Fill in Time
-    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp','blockNumber'], how='outer').sort_values(by='timestamp')
+    both_pools = pd.merge(pool1_swap_df, pool0_swap_df, on=['time','timestamp','blockNumber',], how='outer').sort_values(by='timestamp')
     both_pools = both_pools.ffill().reset_index(drop=True)
     ###########
     # Add columns that include information from both pools.

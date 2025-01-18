@@ -44,8 +44,10 @@ def find_pool_pairs(thegraph_api_key, location):
                 'filename':f"{location}{filename}",
                 'address':address,
                 'feeTier':int(metadata['feeTier'])*1e-6,
-                'token0':metadata['token0']['symbol'],
-                'token1':metadata['token1']['symbol']
+                't0_symbol':metadata['token0']['symbol'],
+                't1_symbol':metadata['token1']['symbol'],
+                't0_decimal':metadata['token0']['decimals'],
+                't1_decimal':metadata['token1']['decimals'],
             }
             pools.append(pool)
         else:
@@ -59,7 +61,7 @@ def find_pool_pairs(thegraph_api_key, location):
     
     for pool in pools:
         # Create a pair (order doesn't matter, so we use a tuple and sort it)
-        pair = tuple(sorted([pool['token0'], pool['token1']]))
+        pair = tuple(sorted([pool['t0_symbol'], pool['t1_symbol']]))
         address = pool['address']
         
         if pair not in pair_to_addresses:
@@ -224,13 +226,13 @@ if __name__ == "__main__":
         'MODEL_PATH':"models/",
         # PCT_CHANGE model parameters (things that can be ablated using the same data)
         "PCT_CHANGE_MODEL_NAME":"LGBM",
-        "PCT_CHANGE_NUM_LAGS":9,  # Number of lags to create
-        "PCT_CHANGE_N_WINDOW_AVERAGE":[2,4,6,8], # rollling mean value
+        "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
+        "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
         "PCT_CHANGE_TEST_SPLIT":0.2,
         # GAS_FEES model parameters (things that can be ablated using the same data)
         "GAS_FEES_MODEL_NAME":"XGBoost",
         "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
-        "GAS_FEES_N_WINDOW_AVERAGE":[2, 3,6, 8], # rollling mean value
+        "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
         "GAS_FEES_TEST_SPLIT":0.2
     }
 
