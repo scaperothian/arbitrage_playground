@@ -1,17 +1,93 @@
-import pandas as pd
 import os
-import numpy as np
-import seaborn as sns
+import re
 import pickle
 import logging
+
+import numpy as np
+import pandas as pd
+
+import seaborn as sns
 
 # To train the price prediction model...
 import lightgbm as lgb
 import xgboost as xgb
+
+from itertools import combinations
+
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 
+# local modules
 import arbutils
+import fetch
+
+GRAPH_API_KEY = os.getenv("GRAPH_API_KEY")
+
+def find_pool_pairs(thegraph_api_key, location):
+    """
+    search in a directory with csv files with the naming convention pool_id_<address>.  Extract
+    the address and then query for the metadata for the pool.  save the metadata for each file 
+    and determine which ones are valid pairs (i.e. the token pairs).
+    """
+    pools = []
+
+    for filename in [x for x in os.listdir(location) if x.find(f'.csv')!=-1]:
+
+        #print(f"Reading: {filename}")
+        pattern = r"pool_id_(.*?)_swap_final\.csv"
+        match = re.search(pattern, filename)
+        if match:
+            address = match.group(1)
+            #print(f"Found {address}")
+            metadata = fetch.thegraph_request_pool_metadata(thegraph_api_key=thegraph_api_key, pool_address=address)
+            pool = {
+                'filename':f"{location}{filename}",
+                'address':address,
+                'feeTier':int(metadata['feeTier'])*1e-6,
+                'token0':metadata['token0']['symbol'],
+                'token1':metadata['token1']['symbol']
+            }
+            pools.append(pool)
+        else:
+            #ignore this mysterious csv.
+            print(f"Ignoring {filename}")
+    
+    #print(f"Found {len(pools)} pools.")
+
+    pair_to_addresses = {}
+    matching_addresses = []
+    
+    for pool in pools:
+        # Create a pair (order doesn't matter, so we use a tuple and sort it)
+        pair = tuple(sorted([pool['token0'], pool['token1']]))
+        address = pool['address']
+        
+        if pair not in pair_to_addresses:
+            pair_to_addresses[pair] = []
+        
+        # Add the current address to the list of addresses for this pair
+        pair_to_addresses[pair].append(address)
+    
+    # For each token pair, generate all possible combinations of addresses
+    for addresses in pair_to_addresses.values():
+        if len(addresses) > 1:
+            matching_addresses.extend(list(combinations(addresses, 2)))
+    
+    matching_pools = []
+    for addr0,addr1 in matching_addresses:
+        
+        pool_pairs = {'pool0':dict, 'pool1':dict}
+        for pool in pools:
+            if addr0 == pool['address']:
+                pool_pairs['pool0'] = pool
+            elif addr1 == pool['address']:
+                pool_pairs['pool1'] = pool
+        matching_pools.append(pool_pairs)
+            
+    print(f"Found {len(matching_pools)} valid pool pairs.")
+
+    return matching_pools
+
 
 def import_data(location):
     """
@@ -144,17 +220,17 @@ if __name__ == "__main__":
     # ################################
     params = {
         'FORECAST_WINDOW_MIN':1,
-        'TRAINING_DATA_PATH':"../arbitrage_3M/",
+        'TRAINING_DATA_PATH':"data/",
         'MODEL_PATH':"models/",
         # PCT_CHANGE model parameters (things that can be ablated using the same data)
         "PCT_CHANGE_MODEL_NAME":"LGBM",
-        "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
-        "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+        "PCT_CHANGE_NUM_LAGS":9,  # Number of lags to create
+        "PCT_CHANGE_N_WINDOW_AVERAGE":[2,4,6,8], # rollling mean value
         "PCT_CHANGE_TEST_SPLIT":0.2,
         # GAS_FEES model parameters (things that can be ablated using the same data)
         "GAS_FEES_MODEL_NAME":"XGBoost",
         "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
-        "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+        "GAS_FEES_N_WINDOW_AVERAGE":[2, 3,6, 8], # rollling mean value
         "GAS_FEES_TEST_SPLIT":0.2
     }
 
@@ -166,11 +242,27 @@ if __name__ == "__main__":
     PCT_CHANGE_MODEL_NAME = params['PCT_CHANGE_MODEL_NAME']
     GAS_FEES_MODEL_NAME = params['GAS_FEES_MODEL_NAME']
     
-    # ################################
-    # IMPORT TRAINING DATA
-    # ################################
-    df = import_data(TRAINING_DATA_PATH)
+    pool_pairs_list = find_pool_pairs(GRAPH_API_KEY, TRAINING_DATA_PATH)
+    for pool_pair in pool_pairs_list:
+        print(f"Pair: {pool_pair['pool0']['address']}, {pool_pair['pool1']['address']}")
 
+    if len(pool_pairs_list)>1:
+        print("Cannot Support multiple pool pairs in training...yet!")
+        exit
+
+    print(pool_pairs_list)
+    
+    # Loading the files from the directory
+    p0 = pd.read_csv(pool_pairs_list[0]['pool0']['filename'])
+    p1 = pd.read_csv(pool_pairs_list[0]['pool1']['filename'])
+
+    p0_fee_tier = pool_pairs_list[0]['pool0']['feeTier']
+    p1_fee_tier = pool_pairs_list[0]['pool1']['feeTier']
+
+
+    df = arbutils.merge_pool_data_v2(p0,p0_fee_tier,p1,p1_fee_tier)
+    df['time'] = pd.to_datetime(df['time'])     
+    
     # ################################
     # TRAINING PERCENT CHANGE MODEL
     # ################################   
@@ -203,3 +295,4 @@ if __name__ == "__main__":
     # Use this instead of gbm.save_model bc we are using pickle to load the model in our analysis.
     with open(model_filename, 'wb') as f:
         pickle.dump(model, f)
+    

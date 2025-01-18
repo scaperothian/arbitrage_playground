@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # Creates datetime objects for the fetch
     #                     YYYY  MM  DD  HH  MM  SS
     new_date = datetime(*(2025,  1, 14,  2,  0,  0), tzinfo=pytz.UTC)
-    old_date = new_date - timedelta(days=3)
+    old_date = new_date - timedelta(days=30)
     print(f"Attempting to fetch data from {old_date} to {new_date}")
 
     base_path = "data/"
@@ -104,7 +104,13 @@ if __name__ == "__main__":
                         new_date=new_date)
 
     # detele the batch files...
-    print("Deleting the batch files...")
-    for dataset_directory in [f"{pool0_data_path}/", f"{pool1_data_path}/"]:
+    for dataset_directory in [f"{pool0_data_path}", f"{pool1_data_path}"]:
+        print(f"Deleting the batch files in {dataset_directory}")
         delete_batch_files(dataset_directory)
+
+    # detele the batch files...
+    for checkpoint_file in [f"{pool0_checkpoint_file}", f"{pool1_checkpoint_file}"]:
+        print(f"Deleting checkpoint files in {checkpoint_file}")
+        remove_checkpoint_file(checkpoint_file)
+
     

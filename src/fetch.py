@@ -369,9 +369,9 @@ def etherscan_get_chunks(start_block_num, end_block_num):
     """
     Calculates the block ranges to pull data from etherscan.  Anecdotally, a range of blocks that 
     results in more than 5000 transactions will fail.  So, based on a request for range of blocks 
-    of 2500 or more, calculate the block ranges for a request that will more reliably succeed.    
+    of 2000 or more, calculate the block ranges for a request that will more reliably succeed.    
     """
-    MAGIC_NUMBER=2500
+    MAGIC_NUMBER=2000
     chunks = []
     while start_block_num <= end_block_num:
         s = start_block_num
@@ -539,6 +539,47 @@ def thegraph_request_with_pagination(thegraph_api_key, pool_address, old_date, n
 
     return all_data
 
+def thegraph_request_pool_metadata(thegraph_api_key, pool_address):
+    query = """
+    {
+      pools(where: { id: "%s" }) {
+        id
+        token0 {
+          id
+          symbol
+          name
+        }
+        token1 {
+          id
+          symbol
+          name
+        }
+        feeTier
+        sqrtPrice
+        liquidity
+        tick
+      }
+    }
+    """ % pool_address.lower()  # Ensure the address is in lowercase
+
+    try:
+        response = requests.post(
+            f'https://gateway.thegraph.com/api/{thegraph_api_key}/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV',
+            json={'query': query}
+        )  
+    except Exception as e:
+        print(f"Post error occurred: {e}")
+        return
+
+    if response.status_code == 200:
+        data = response.json()
+        if "data" in data and "pools" in data["data"] and len(data["data"]["pools"]) > 0:
+            return data["data"]["pools"][0]
+        else:
+            raise ValueError(f"No data found for pool address {pool_address}")
+    else:
+        raise ValueError(f"Failed to fetch data from The Graph: {response.status_code} - {response.text}")
+
 def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date=None, new_date=None, data_path=None, checkpoint_file='checkpoint.json',batch_size=1000):
     """
     assume that data_path == None means that we are not saving data...
@@ -602,31 +643,40 @@ def thegraph_request(thegraph_api_key, etherscan_api_key, pool_address, old_date
         pool_startblock = swaps_df['blockNumber'].iloc[0]
         pool_endblock = swaps_df['blockNumber'].iloc[-1]
 
+        print(f"Merging token transactions from blocks {pool_startblock} to {pool_endblock} ")
         # must throttle the requests for tokentx.  it will give you 
         # less than 5000 transactions regardless of what block range you 
         # give it.  so we break it up into 2500 block chunks.
         block_chunks = etherscan_get_chunks(pool_startblock, pool_endblock)
         swaps_tokentx_df = pd.DataFrame()
         for startblock, endblock in block_chunks:
+            print(f"  {startblock} to {endblock} ")
             #throttle requests...
-            time.sleep(0.01)
+            time.sleep(0.1)
             swaps_tokentx_df = pd.concat([swaps_tokentx_df, etherscan_request_tokentx(etherscan_api_key, 
                                                                    pool_address, 
                                                                    start_block=startblock, 
                                                                    end_block=endblock)])
+
+        if swaps_tokentx_df.shape[0] < swaps_df.shape[0]:
+            print("Error transfer tokens search should always yield more transactions.  Something is wrong with the batch fetch...")
+            return None
 
         #swaps_tokentx_df = etherscan_request_tokentx(etherscan_api_key, pool_address, start_block=startblock-1, end_block=endblock+1)
         print(f"Swaps Found (Prior to Merge): {swaps_df.shape}")
         print(f"Found {swaps_tokentx_df.shape[0]} Token Tx between {swaps_df['timeStamp'].iloc[0]} and {swaps_df['timeStamp'].iloc[-1]}")
         swaps_df = pd.merge(swaps_df.drop(labels=['gasUsed'],axis=1), swaps_tokentx_df[['timeStamp','blockNumber','transactionHash','gasUsed']], on=['timeStamp','blockNumber','transactionHash'], how='left')
         print(f"Swaps Found (After Merge): {swaps_df.shape}")   
-
+        
+    # sending required columns only...this could change.
+    swaps_df = swaps_df[['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
+            'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
+            'liquidity']]
+    
     if data_path: 
-        swaps_df.to_csv(f'{data_path}/pool_id_{pool_address}_swap_final.csv')
+        swaps_df.to_csv(f'{data_path}/pool_id_{pool_address}_swap_final.csv',index=False)
 
-    return swaps_df[['transactionHash', 'datetime', 'timeStamp', 'sqrtPriceX96',
-                'blockNumber', 'gasPrice', 'gasUsed', 'tick', 'amount0', 'amount1',
-                'liquidity']]
+    return swaps_df
 
 
 if __name__ == "__main__":
