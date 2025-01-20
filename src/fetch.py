@@ -46,6 +46,26 @@ def etherscan_decode_data(logs,transaction_hashes):
             raw_data.append((block,amount0, amount1, sqrt_price_x96, liquidity, tick,transaction_hash))
     return raw_data
 
+def etherscan_request_transaction_receipt(api_key, transaction_hash):
+
+    base_url = "https://api.etherscan.io/api"
+
+    params = {
+        "module": "proxy",
+        "action": "eth_getTransactionReceipt",
+        "txhash":transaction_hash,
+        "apikey": api_key,
+    }
+    data = {'result':[]}
+    #while not data['result']:
+    response = requests.get(base_url, params=params)
+    data = response.json()
+    
+    if "result" in data:
+        return data["result"]
+    else:
+        raise ValueError(f"ValueError fetching transaction receipt for transaction {transaction_hash}: {data.get('message', 'Unknown error')}")
+
 # Function to fetch logs from a block
 def etherscan_logs_for_block(api_key, block_number, pool_address):
 
@@ -373,12 +393,12 @@ def etherscan_get_chunks(start_block_num, end_block_num):
     """
     MAGIC_NUMBER=2000
     chunks = []
-    while start_block_num <= end_block_num:
+    while start_block_num < end_block_num:
         s = start_block_num
         e = start_block_num+MAGIC_NUMBER
         if e > end_block_num: 
             e = end_block_num
-        start_block_num = e+1
+        start_block_num = e
         chunks.append((s,e))
     return chunks
 
@@ -501,7 +521,7 @@ def thegraph_request_with_pagination(thegraph_api_key, pool_address, old_date, n
         data = response.json()
         if 'errors' in data:
             raise Exception(f"GraphQL query error: {data['errors']}")
-            
+        
         new_data = data['data']['swaps'] if 'swaps' in data['data'] else []
         if not new_data:
             # Exit Loop?
