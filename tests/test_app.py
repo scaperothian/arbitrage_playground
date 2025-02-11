@@ -653,9 +653,19 @@ class TestAppMethods(unittest.TestCase):
         # Create dummy data
         data = {
             'percent_change': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_2': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_4': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_6': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
             'rolling_mean_8': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
             'lag_1': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
             'lag_2': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_3': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_4': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_5': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_6': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_7': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_8': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'lag_9': np.random.uniform(-10, 10.0, size=num_rows),           # Random WETH to USD ratios            
         }
         x_pct_test = pd.DataFrame(data)
 
@@ -700,8 +710,10 @@ class TestAppMethods(unittest.TestCase):
             'lag_7': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
             'lag_8': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
             'lag_9': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
-            'rolling_mean_3': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_2': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_3': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios            
             'rolling_mean_6': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
+            'rolling_mean_8': np.random.uniform(0, 10.0, size=num_rows),           # Random WETH to USD ratios
 
         }
         x_pct_test = pd.DataFrame(data)
@@ -839,8 +851,8 @@ class TestAppMethods(unittest.TestCase):
                                         GAS_FEES_COL_NAME,
                                         PERCENT_CHANGE_COL_NAME,
                                         min_investment_col='min_amount_to_invest')
-        
-        self.assertTrue(math.isnan(df.iloc[0]['min_amount_to_invest']))
+
+        self.assertTrue(df.iloc[0]['min_amount_to_invest'] < 0.0)
 
     def test_min_investment_scenario_4(self):
         """

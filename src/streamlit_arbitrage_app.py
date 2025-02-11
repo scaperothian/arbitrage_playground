@@ -37,13 +37,13 @@ model_params = {
     'MODEL_PATH':"../models/",
     # PCT_CHANGE model parameters (things that can be ablated using the same data)
     "PCT_CHANGE_MODEL_NAME":"LGBM",
-    "PCT_CHANGE_NUM_LAGS":2,  # Number of lags to create
-    "PCT_CHANGE_N_WINDOW_AVERAGE":[8], # rollling mean value
+    "PCT_CHANGE_NUM_LAGS":9,  # Number of lags to create
+    "PCT_CHANGE_N_WINDOW_AVERAGE":[2,4,6,8], # rollling mean value
     "PCT_CHANGE_TEST_SPLIT":0.2,
     # GAS_FEES model parameters (things that can be ablated using the same data)
     "GAS_FEES_MODEL_NAME":"XGBoost",
     "GAS_FEES_NUM_LAGS":9,  # Number of lags to create
-    "GAS_FEES_N_WINDOW_AVERAGE":[3,6], # rollling mean value
+    "GAS_FEES_N_WINDOW_AVERAGE":[2,3,6,8], # rollling mean value
     "GAS_FEES_TEST_SPLIT":0.2
 }
 

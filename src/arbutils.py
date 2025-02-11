@@ -412,12 +412,18 @@ def calculate_min_investment(df,pool0_txn_fee_col, pool1_txn_fee_col, gas_fee_co
     #    T1 > T0, negative outcome if |ΔP| < (1-T0)/(1-T1) - 1
     #    T1 > T0, positive outcome if |ΔP| > (1-T0)/(1-T1) - 1
     def min_investment(row):
-        result = row[gas_fee_col] / (
-            (1 + abs(row[percent_change_col])) *
-            (1 - row[pool1_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool0_txn_fee_col]) -
-            (1 - row[pool0_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool1_txn_fee_col])
-        )
-        if not np.isfinite(result):  # Check for inf or NaN
+        try: 
+            result = row[gas_fee_col] / (
+                (1 + abs(row[percent_change_col])) *
+                (1 - row[pool1_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool0_txn_fee_col]) -
+                (1 - row[pool0_txn_fee_col] if row[percent_change_col] < 0 else 1 - row[pool1_txn_fee_col])
+            )
+        except ZeroDivisionError:
+            print(f"WARNING: Divide by Zero: {row[percent_change_col]}, {row[pool0_txn_fee_col]}, {row[pool1_txn_fee_col]}")
+            return np.nan
+        
+        if not np.isfinite(result):  # Catch other NaN conditions...
+            print(f"WARNING: NaNs.")
             return np.nan
         
         return result
